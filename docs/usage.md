@@ -86,6 +86,41 @@ After the real decision is recorded, it starts once with a stable request ID,
 waits in bounded calls, and retrieves the automatic report. Missing responses do
 not justify starting a second run. Reports remain available after reconnection.
 
+## Select identities
+
+The Agent can declare `identityProfiles` when a test needs multiple accounts.
+Each profile maps local credential aliases to names in the environment's
+`secretBindings`. For example, this partial plan uses the `ownerUsername` and
+`ownerPassword` bindings through the aliases `username` and `password`:
+
+```yaml
+identityProfiles:
+  - id: owner
+    description: The account that creates the resource
+    credentialRefs:
+      username: ownerUsername
+      password: ownerPassword
+    evidenceRefs: ["<sourceRef>#L1"]
+```
+
+Set `identityRef: owner` on its HTTP, load, and cleanup steps. The login body can
+use `${secrets.username}` / `${secrets.password}`; subsequent authentication headers
+can use `${vars.accessToken}`. Capture tokens and session credentials with
+`purpose: authentication`. They stay private to the selected identity, are
+redacted, and are omitted from persisted ledger values even if `secret` was false.
+Two identities may use the same variable name without sharing its value.
+
+Other captured data belongs to the case, so an outsider request can use an ID
+created by the owner to check access restrictions. Mark sensitive business data
+`secret: true` to redact it and omit its ledger value while preserving the planned
+data flow. Cases keep separate data. A step without `identityRef` uses the default
+scope, and does not inherit the previous step's identity or its credentials.
+
+Unknown identities, aliases, bindings, and missing variable sources are rejected
+before review. Changes to profiles or identity selections require another review.
+Reports identify the selected identity for each step. Cleanup and recovery use
+the same selections; unrecoverable old sessions are reported with their identities.
+
 ## CLI replay
 
 The CLI uses the same core and review gate:

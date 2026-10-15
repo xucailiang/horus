@@ -1,0 +1,129 @@
+openapi: 3.1.0
+info: {title: Workflow API, version: '1'}
+paths:
+  /auth/token:
+    post:
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties: {username: {type: string}, password: {type: string}}
+      responses:
+        '200':
+          description: Independent session
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token]
+                properties: {token: {type: string}}
+        '401': {description: Invalid credentials}
+  /auth/logout:
+    post:
+      operationId: logout
+      security: [{bearer: []}]
+      responses: {'204': {description: Session revoked}, '401': {description: Unauthorized}}
+  /tickets:
+    post:
+      operationId: createTicket
+      security: [{bearer: []}]
+      requestBody: {$ref: '#/components/requestBodies/Title'}
+      responses:
+        '201':
+          description: New draft owned by the current user
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Ticket'}
+        '400': {description: Invalid title}
+  /tickets/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    get:
+      operationId: getTicket
+      security: [{bearer: []}]
+      responses:
+        '200':
+          description: Owner reads original ticket fields
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Ticket'}
+        '403': {description: Another user's ticket}
+        '404': {description: Missing ticket}
+    patch:
+      operationId: updateTicket
+      security: [{bearer: []}]
+      requestBody: {$ref: '#/components/requestBodies/Title'}
+      responses:
+        '200': {description: Owner updates a draft title}
+        '403': {description: Another user's ticket}
+        '409': {description: Not a draft}
+    delete:
+      operationId: deleteTicket
+      security: [{bearer: []}]
+      responses:
+        '204': {description: Ticket and associated jobs removed}
+        '403': {description: Another user's ticket}
+        '404': {description: Missing ticket}
+  /tickets/{id}/submit:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    post:
+      operationId: submitTicket
+      security: [{bearer: []}]
+      responses:
+        '202':
+          description: Draft accepted for asynchronous submission
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobId, ticketId]
+                properties: {jobId: {type: string}, ticketId: {type: string}}
+        '403': {description: Another user's ticket}
+        '409': {description: Not a draft}
+  /jobs/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    get:
+      operationId: getJob
+      security: [{bearer: []}]
+      responses:
+        '200':
+          description: Owner observes bounded asynchronous progress
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, ticketId, owner, state]
+                properties:
+                  id: {type: string}
+                  ticketId: {type: string}
+                  owner: {type: string}
+                  state: {type: string, enum: [pending, done]}
+        '403': {description: Another user's job}
+        '404': {description: Missing job}
+    delete:
+      operationId: deleteJob
+      security: [{bearer: []}]
+      responses: {'204': {description: Job removed}, '403': {description: Another user's job}, '404': {description: Missing job}}
+components:
+  securitySchemes: {bearer: {type: http, scheme: bearer}}
+  requestBodies:
+    Title:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [title]
+            properties: {title: {type: string}}
+  schemas:
+    Ticket:
+      type: object
+      required: [id, title, owner, state]
+      properties:
+        id: {type: string}
+        title: {type: string}
+        owner: {type: string}
+        state: {type: string, enum: [draft, processing, submitted]}

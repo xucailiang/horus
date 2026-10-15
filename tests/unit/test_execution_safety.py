@@ -84,7 +84,8 @@ async def test_cancel_during_cleanup_finishes_delete_before_reporting(tmp_path, 
             await asyncio.gather(execution, return_exceptions=True)
 
 
-async def test_secret_capture_objects_and_numbers_never_reach_events(tmp_path, monkeypatch):
+@pytest.mark.parametrize("secret", [True, False])
+async def test_authentication_objects_and_numbers_never_reach_events(tmp_path, monkeypatch, secret):
     runner = prepared_runner(tmp_path, monkeypatch)
 
     async def request(self, operation, base_url, request):
@@ -99,17 +100,25 @@ async def test_secret_capture_objects_and_numbers_never_reach_events(tmp_path, m
             "captures": {
                 "session": {
                     "jsonPointer": "/session",
-                    "secret": True,
+                    "secret": secret,
                     "purpose": "authentication",
                 }
             },
-            "assertions": [{"id": "status", "status": 200, "evidenceRefs": ["contract"]}],
+            "assertions": [
+                {"id": "status", "status": 200, "evidenceRefs": ["contract"]},
+                {
+                    "id": "same-session",
+                    "jsonPointer": "/session",
+                    "expected": "${vars.session}",
+                    "evidenceRefs": ["contract"],
+                },
+            ],
         }
     )
-    context = {"vars": {}, "secrets": {}, "run": {"id": runner.run_id}}
+    context = runner.context()
     result = await runner.step(step, context, case_id="secret")
     assert result["status"] == "passed"
-    assert context["vars"]["session"]["access"] == "private-session"
+    assert context.view(None)["vars"]["session"]["access"] == "private-session"
     for path in runner.root.rglob("*"):
         if path.is_file():
             content = path.read_text()
@@ -164,7 +173,7 @@ async def test_secret_equal_to_control_word_cannot_change_test_verdict(tmp_path,
             "assertions": [{"id": "failed", "status": 200, "evidenceRefs": ["contract"]}],
         }
     )
-    action = await runner.step(step, {"vars": {}, "secrets": {}, "run": {}}, case_id="failed")
+    action = await runner.step(step, runner.context(), case_id="failed")
     assert action["status"] == "failed"
     assert action["id"] == "failed"
     assert action["assertions"][0]["status"] == "failed"
@@ -184,9 +193,7 @@ async def test_cleanup_with_missing_captures_skips_before_materializing_request(
             "assertions": [{"id": "status", "status": 204, "evidenceRefs": ["contract"]}],
         }
     )
-    action = await runner.step(
-        step, {"vars": {}, "secrets": {}, "run": {}}, case_id="missing", cleanup=True
-    )
+    action = await runner.step(step, runner.context(), case_id="missing", cleanup=True)
     assert action["status"] == "skipped"
     assert action["reason"] == "missing_cleanup_inputs"
     assert not runner.ledger

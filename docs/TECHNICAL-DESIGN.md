@@ -209,12 +209,12 @@ schemaVersion 固定为字符串 1，共享 Pydantic 严格模型是 CLI、MCP�
 | DataDependency | 生产接口及字段、消费接口及位置、用途、生命周期、evidenceRefs |
 | Coverage | 流程→case、规则→assertion、数据依赖→capture/请求字段；未覆盖项列原因 |
 | Case | id、kind= functional/performance、steps、cleanup；steps 由 Http/Branch/Poll/Load 构成 |
-| IdentityProfile | id、描述、credentialRefs、evidenceRefs；仅引用项目已提供的凭据绑定，不保存明文 |
+| IdentityProfile | id、描述、credentialRefs（别名→环境 secretBindings 名称）、evidenceRefs；不保存凭据值 |
 | HttpStep | id、operationId、request、captures、assertions、可选 identityRef/dependsOn；role 可为 authentication/prepare/exercise，默认 exercise |
 | BranchStep | id、kind=branch、predicate、thenSteps、elseSteps、声明的输出；执行前冻结两个分支及各自范围 |
 | PollStep | id、kind=poll、requestStep、until、intervalMs、maxAttempts、timeoutMs；只允许明确配置为只读的操作 |
 | Predicate | 字面值/已捕获变量/当前轮询响应字段的类型化比较及 all/any/not 组合；不接受脚本 |
-| LoadStep | id、kind=load、operationId、request、assertions、loadProfile、thresholds |
+| LoadStep | id、kind=load、operationId、request、assertions、loadProfile、thresholds、可选 identityRef |
 | Request | pathParams、query、headers、JSON body；method/path 从目录获取 |
 | Capture | 变量名、status/header/jsonPointer 来源、敏感性和用途 |
 | Assertion | id、查询、操作符、预期、evidenceRefs |
@@ -229,6 +229,8 @@ schemaVersion 固定为字符串 1，共享 Pydantic 严格模型是 CLI、MCP�
 固定 k6 运行时对 Unicode 属性转义（\p{...}/\P{...}）匹配不正确，因此负载计划在送审前拒绝此语法，使用显式字符范围或改为功能检查；不能静默执行并产生错误结论。
 
 状态与身份测试沿用相同通用请求/断言：业务规则描述允许或禁止的状态变化，case 执行动作后检查状态和数据；负例用明确错误预期。identityRef 选择计划中声明的凭据绑定，token 仍通过显式鉴权步骤捕获并按身份隔离。缺少所需身份在送审前列缺口，不能借用另一个身份计为通过。
+
+认证捕获使用 purpose=authentication，按用例及 identityRef 保存，始终脱敏且不写入账本值。同名 token 在不同身份下不共享；省略 identityRef 使用独立的默认作用域。其他业务捕获按用例共享；secret=true 只控制脱敏和账本持久化，敏感资源标识仍可按已审核计划传给其他身份请求。HTTP、负载、finally 和修复清理使用相同作用域；恢复鉴权前驱按身份和变量名一起匹配，旧会话残留保留身份。
 
 BranchStep 仅按已存在变量选择一个预先审核的分支，未选分支为 skipped，原因 not_selected，不记为通过；后续使用的输出必须在所有可能路径定义，或有可校验的保护条件。校验拒绝循环依赖、不支持的动态动作和不明确的变量来源。
 

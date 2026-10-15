@@ -225,6 +225,16 @@ class Service:
                 numbers = [int(n) for n in re.findall(r"\d+", locator)]
                 if max(numbers) > len(sources[source_ref]["text"].splitlines()):
                     raise HorusError("invalid_evidence", ref)
+        profiles = {profile.id: profile for profile in plan.identityProfiles}
+        if len(profiles) != len(plan.identityProfiles):
+            raise HorusError("duplicate_identity")
+        env = config.environments.get(environment) if config else None
+        if config and env is None:
+            raise HorusError("unknown_environment", environment)
+        if env:
+            for profile in profiles.values():
+                if not set(profile.credentialRefs.values()).issubset(env.secretBindings):
+                    raise HorusError("missing_identity_binding", profile.id)
         case_ids: set[str] = set()
         assertion_refs: set[str] = set()
         capture_refs: set[str] = set()
@@ -235,14 +245,24 @@ class Service:
                 raise HorusError("duplicate_case", case.id)
             case_ids.add(case.id)
             known: set[str] = set()
+            private: dict[str | None, set[str]] = {}
+            private_names: set[str] = set()
+            public_names: set[str] = set()
+            for http in [*case.steps, *case.cleanup]:
+                if isinstance(http, HttpStep):
+                    for name, capture in http.captures.items():
+                        (private_names if capture.private else public_names).add(name)
+            if private_names.intersection(public_names):
+                raise HorusError("ambiguous_variable_scope", case.id)
             prior: set[str] = set()
             for step in [*case.steps, *case.cleanup]:
                 location = f"{case.id}.{step.id}"
                 if step.id in prior or step.operationId not in operations:
                     raise HorusError("invalid_step", location)
                 step_refs.add(location)
-                if isinstance(step, HttpStep) and step.identityRef:
-                    raise HorusError("unsupported_identity", location)
+                if step.identityRef is not None and step.identityRef not in profiles:
+                    raise HorusError("unknown_identity", location)
+                visible = known | private.get(step.identityRef, set())
                 request_json = step.request.model_dump_json()
                 if re.search(r"\{\{[A-Za-z_][A-Za-z0-9_]*\}\}", request_json):
                     raise HorusError(
@@ -253,15 +273,29 @@ class Service:
                 for expression in re.findall(r"(?<!\$)\$\{[^}]+\}", request_json):
                     if not VARIABLE.fullmatch(expression):
                         raise HorusError("unsupported_variable_syntax", location)
-                for namespace, name in VARIABLE.findall(request_json):
-                    if namespace == "vars" and name not in known:
-                        raise HorusError("missing_variable_source", f"{location}: {name}")
-                    if namespace == "run" and name != "id":
-                        raise HorusError("unknown_run_variable", name)
-                    if namespace == "secrets" and config:
-                        env = config.environments.get(environment)
-                        if env is None or name not in env.secretBindings:
-                            raise HorusError("missing_secret_binding", name)
+                captured = set(step.captures) if isinstance(step, HttpStep) else set()
+                for data, available in [
+                    (request_json, visible),
+                    (
+                        json.dumps([a.model_dump(mode="json") for a in step.assertions]),
+                        visible | captured,
+                    ),
+                ]:
+                    for namespace, name in VARIABLE.findall(data):
+                        if namespace == "vars" and name not in available:
+                            raise HorusError("missing_variable_source", f"{location}: {name}")
+                        if namespace == "run" and name != "id":
+                            raise HorusError("unknown_run_variable", name)
+                        if namespace == "secrets":
+                            bindings = (
+                                profiles[step.identityRef].credentialRefs
+                                if step.identityRef is not None
+                                else env.secretBindings
+                                if env
+                                else None
+                            )
+                            if bindings is not None and name not in bindings:
+                                raise HorusError("missing_secret_binding", f"{location}: {name}")
                 cleanup = step in case.cleanup
                 if config:
                     allowed = config.policy.cleanupAllow if cleanup else config.policy.runAllow
@@ -277,9 +311,13 @@ class Service:
                 if isinstance(step, HttpStep):
                     if not set(step.dependsOn).issubset(prior):
                         raise HorusError("invalid_dependency", location)
-                    if not set(step.requires).issubset(known):
+                    if not set(step.requires).issubset(visible):
                         raise HorusError("unknown_cleanup_variable", location)
-                    known.update(step.captures)
+                    for name, capture in step.captures.items():
+                        if capture.private:
+                            private.setdefault(step.identityRef, set()).add(name)
+                        else:
+                            known.add(name)
                     capture_refs.update(f"{location}.{name}" for name in step.captures)
                     max_requests += 1
                 else:

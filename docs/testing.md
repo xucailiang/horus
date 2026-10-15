@@ -16,10 +16,14 @@ uv build
 uv run python -m tests.acceptance.verify_wheel
 ```
 
-The standard-library HTTP fixture is permanent regression infrastructure. Its
-business contract is independent of fault modes. Tests cover:
+The standard-library HTTP fixtures provide permanent regressions. Their business
+contracts are independent of fault modes. Tests cover:
 
 - Authentication, isolated creation, read/data assertions, deletion, and logout.
+- A second permanent workflow API verifies owner/outsider HTTP requests, load and
+  cleanup with separate credentials. Its permission fault must fail the same plan.
+  Crash recovery reauthenticates both identities without recreating tickets, revokes
+  new sessions, and reports the old lost sessions by identity.
 - A separate fixed 5-VU/100-read scenario with latency and correctness thresholds.
 - HTTP 200 with incorrect data, excessive latency, and HTTP failures.
 - Review gates, immutable references, scope mismatch, and cross-project isolation.
@@ -42,10 +46,10 @@ They are never counted as actual human approval.
 `tests.acceptance.verify_wheel` creates a clean Python 3.12 environment, exports
 hash-locked base dependencies from `uv.lock`, and installs the built wheel without
 MCP extras. It verifies packaged Skill/JavaScript files, imports an existing review
-package, and runs normal and data-error scenarios through the CLI.
+package, and runs normal, data-error, and two-identity workflow scenarios through the CLI.
 
-The expected exit codes are 0 and 1 respectively, and both runs must remove their
-records and revoke their sessions. No model API, MCP server, or business source
+The expected exit codes are 0, 1, and 0 respectively. Every run must remove its
+records/tickets and revoke its sessions. No model API, MCP server, or business source
 checkout is needed. The same CLI can replay a reviewed plan against an already
 deployed test service. The project uses local verification and has no hosted CI
 pipeline.
@@ -95,7 +99,7 @@ an SDK-only round trip must be reported as incomplete native acceptance.
 ## Remaining acceptance work
 
 The first deterministic slice is implemented and locally verified. Complete
-two-client native generation and actual human approval, a second workflow-shaped
-backend, identity/branch/poll behavior, and parallel functional cases before claiming
+two-client native generation and actual human approval, the second backend's state
+and asynchronous workflow, branch/poll behavior, and parallel functional cases before claiming
 the full M1 milestone. See [implementation notes](IMPLEMENTATION.md) for current
 evidence and gaps.

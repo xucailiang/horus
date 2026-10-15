@@ -13,7 +13,9 @@ from horus.core.bundles import export_review
 from horus.core.service import Service
 from horus.core.store import atomic_write
 from tests.fixtures.reference_api import ReferenceServer
+from tests.fixtures.workflow_api import WorkflowServer
 from tests.support import FIXTURES, reviewed_regression_plan
+from tests.workflow_plan import reviewed_workflow_plan
 
 
 def main() -> None:
@@ -43,6 +45,10 @@ def main() -> None:
             "HORUS_TEST_MODE": "1",
             "HORUS_USERNAME": "fixture-user",
             "HORUS_PASSWORD": "private-wheel-fixture",
+            "HORUS_OWNER_USERNAME": "wheel-owner",
+            "HORUS_OWNER_PASSWORD": "wheel-owner-private",
+            "HORUS_OUTSIDER_USERNAME": "wheel-outsider",
+            "HORUS_OUTSIDER_PASSWORD": "wheel-outsider-private",
             "HORUS_HURL_BIN": engine_path("hurl"),
             "HORUS_K6_BIN": engine_path("k6"),
         }
@@ -71,14 +77,24 @@ assert [check["status"] for check in checks] == ["passed", "failed"]
 """,
         ], env=env, cwd=root, check=True)
         print("base wheel: Unicode regex pass/fail and matching child process verified")
-        for mode, code, verdict in [("normal", 0, "passed"), ("data-error", 1, "failed")]:
-            server = ReferenceServer(
-                0, mode=mode, username=env["HORUS_USERNAME"], password=env["HORUS_PASSWORD"]
-            )
+        for mode, code, verdict in [
+            ("normal", 0, "passed"), ("data-error", 1, "failed"), ("workflow", 0, "passed"),
+        ]:
+            if mode == "workflow":
+                server = WorkflowServer(0, users={
+                    env["HORUS_OWNER_USERNAME"]: env["HORUS_OWNER_PASSWORD"],
+                    env["HORUS_OUTSIDER_USERNAME"]: env["HORUS_OUTSIDER_PASSWORD"],
+                })
+                planner = reviewed_workflow_plan
+            else:
+                server = ReferenceServer(
+                    0, mode=mode, username=env["HORUS_USERNAME"], password=env["HORUS_PASSWORD"]
+                )
+                planner = reviewed_regression_plan
             threading.Thread(target=server.serve_forever, daemon=True).start()
             try:
                 service = Service(root / f"source-{mode}", read_roots=[FIXTURES])
-                project, plan, review = reviewed_regression_plan(
+                project, plan, review = planner(
                     service, f"http://127.0.0.1:{server.server_port}"
                 )
                 package = root / f"{mode}.json"
@@ -95,10 +111,17 @@ assert [check["status"] for check in checks] == ["passed", "failed"]
                 assert result.returncode == code, result.stderr.decode(errors="replace")
                 summary = json.loads(result.stdout)
                 assert summary["verdict"] == verdict, summary
-                assert not server.records and not server.tokens
+                assert not server.tokens
+                if isinstance(server, WorkflowServer):
+                    assert not server.tickets and not server.jobs
+                else:
+                    assert not server.records
                 for path in workspace.rglob("*"):
                     if path.is_file():
-                        assert env["HORUS_PASSWORD"] not in path.read_text(errors="replace")
+                        text = path.read_text(errors="replace")
+                        assert all(env[key] not in text for key in [
+                            "HORUS_PASSWORD", "HORUS_OWNER_PASSWORD", "HORUS_OUTSIDER_PASSWORD",
+                        ])
                 print(f"base wheel: {mode} → {verdict}, exit {code}; cleanup verified")
             finally:
                 server.shutdown()

@@ -1,10 +1,45 @@
 import json
 import re
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote
 
+from horus.core.models import Capture, IdentityProfile
 from horus.core.service import VARIABLE
 from horus.core.store import HorusError
+
+
+@dataclass
+class CaseContext:
+    run_id: str
+    secrets: dict[str, str]
+    profiles: dict[str, IdentityProfile] = field(default_factory=dict)
+    shared: dict[str, Any] = field(default_factory=dict)
+    private: dict[str | None, dict[str, Any]] = field(default_factory=dict)
+
+    def view(self, identity: str | None) -> dict[str, dict[str, Any]]:
+        if identity is not None and identity not in self.profiles:
+            raise HorusError("unknown_identity", identity)
+        try:
+            secrets = (
+                {
+                    alias: self.secrets[binding]
+                    for alias, binding in self.profiles[identity].credentialRefs.items()
+                }
+                if identity is not None
+                else self.secrets
+            )
+        except KeyError as exc:
+            raise HorusError("missing_credential", str(exc)) from exc
+        return {
+            "vars": {**self.shared, **self.private.get(identity, {})},
+            "secrets": secrets,
+            "run": {"id": self.run_id},
+        }
+
+    def capture(self, identity: str | None, name: str, capture: Capture, value: Any) -> None:
+        target = self.private.setdefault(identity, {}) if capture.private else self.shared
+        target[name] = value
 
 
 def resolve(value: Any, context: dict[str, dict[str, Any]]) -> Any:

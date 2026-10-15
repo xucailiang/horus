@@ -13,7 +13,7 @@ from horus.core.models import HttpStep, LoadStep, Plan, ProjectConfig, Request, 
 from horus.core.resources import resource_summary
 from horus.core.service import VARIABLE, Service
 from horus.core.store import HorusError, atomic_write, file_lock
-from horus.core.values import Redactor, resolve
+from horus.core.values import CaseContext, Redactor, resolve
 
 
 def verdict(cases: list[dict[str, Any]]) -> str:
@@ -60,8 +60,12 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
         lines.extend([f"## {case['id']}", ""])
         for step in [*case["steps"], *case["cleanup"]]:
             count += 1
-            lines.append(f"- {step['id']}: {step['status']}")
+            identity = f" ({step['identityRef']})" if step.get("identityRef") is not None else ""
+            lines.append(f"- {step['id']}{identity}: {step['status']}")
             node = ET.SubElement(suite, "testcase", classname=case["id"], name=step["id"])
+            if step.get("identityRef") is not None:
+                properties = ET.SubElement(node, "properties")
+                ET.SubElement(properties, "property", name="identityRef", value=step["identityRef"])
             if step["status"] in {"error", "failed"}:
                 failures += 1
                 ET.SubElement(node, "failure", message=step["status"]).text = json.dumps(step)
@@ -171,6 +175,16 @@ class Runner:
         self.phase = "queued"
         self.active_load = False
 
+    def context(
+        self, run_id: str | None = None, *, shared: dict[str, Any] | None = None
+    ) -> CaseContext:
+        return CaseContext(
+            run_id=run_id or self.run_id,
+            secrets=self.secrets,
+            profiles={profile.id: profile for profile in self.plan.identityProfiles},
+            shared=shared if shared is not None else {},
+        )
+
     def state(self, status: str) -> None:
         self.phase = status
         atomic_write(self.root / "state.json", {**self.intent, "status": status})
@@ -218,7 +232,7 @@ class Runner:
     async def step(
         self,
         step: HttpStep | LoadStep,
-        context: dict[str, dict[str, Any]],
+        context: CaseContext,
         *,
         case_id: str,
         cleanup: bool = False,
@@ -232,13 +246,15 @@ class Runner:
             "state": "intent",
             "variables": {},
         }
+        if step.identityRef is not None:
+            record["identityRef"] = entry["identityRef"] = step.identityRef
         try:
-            if isinstance(step, HttpStep) and not set(step.requires).issubset(context["vars"]):
+            values = context.view(step.identityRef)
+            if isinstance(step, HttpStep) and not set(step.requires).issubset(values["vars"]):
                 return self.event(
                     {**record, "status": "skipped", "reason": "missing_cleanup_inputs"}
                 )
-            materialized = resolve(step.model_dump(mode="json"), context)
-            request = Request.model_validate(materialized["request"])
+            request = Request.model_validate(resolve(step.request.model_dump(mode="json"), values))
             operation = self.operations[step.operationId]
             self.ledger.append(entry)
             self.persist_ledger()
@@ -246,7 +262,17 @@ class Runner:
                 self.active_load = True
                 try:
                     result = await K6Adapter().run(
-                        operation, self.base_url, LoadStep.model_validate(materialized)
+                        operation,
+                        self.base_url,
+                        LoadStep.model_validate(
+                            {
+                                **step.model_dump(mode="json"),
+                                "request": request.model_dump(mode="json"),
+                                "assertions": resolve(
+                                    [a.model_dump(mode="json") for a in step.assertions], values
+                                ),
+                            }
+                        ),
                     )
                 finally:
                     self.active_load = False
@@ -265,15 +291,16 @@ class Runner:
                         value = response.status
                     if value is MISSING:
                         raise HorusError("capture_missing", name)
-                    context["vars"][name] = value
-                    if capture.secret:
+                    context.capture(step.identityRef, name, capture, value)
+                    values["vars"][name] = value
+                    if capture.secret or capture.private:
                         self.redactor.register(value)
                     else:
                         entry["variables"][name] = value
                 entry["state"] = "confirmed" if 200 <= response.status < 300 else "unknown"
                 self.persist_ledger()
                 assertions = [
-                    a.model_validate(resolve(a.model_dump(mode="json"), context))
+                    a.model_validate(resolve(a.model_dump(mode="json"), values))
                     for a in step.assertions
                 ]
                 checks = await response.check(assertions)
@@ -343,7 +370,7 @@ class Runner:
         for case in self.plan.cases:
             output: dict[str, Any] = {"id": case.id, "steps": [], "cleanup": []}
             result["cases"].append(output)
-            context = {"vars": {}, "secrets": self.secrets, "run": {"id": self.run_id}}
+            context = self.context()
             blocked = self.cancelled or time.monotonic() >= deadline
             self.state("running")
             try:
@@ -376,7 +403,7 @@ class Runner:
         self,
         case_id: str,
         steps: list[HttpStep],
-        context: dict[str, dict[str, Any]],
+        context: CaseContext,
     ) -> list[dict[str, Any]]:
         self.state("cleaning")
         deadline = time.monotonic() + self.config.policy.limits.maxCleanupDurationMs / 1000
@@ -451,39 +478,60 @@ class Runner:
                     )
                 )
                 continue
-            context = {
-                "vars": {
+            context = self.context(
+                original_id,
+                shared={
                     key: value
                     for entry in entries
                     for key, value in entry["variables"].items()
                     if "[REDACTED]" not in json.dumps(value)
                 },
-                "secrets": self.secrets,
-                "run": {"id": original_id},
-            }
-            required = {
+            )
+            private_names = {
                 name
+                for step in [*case.steps, *case.cleanup]
+                if isinstance(step, HttpStep)
+                for name, capture in step.captures.items()
+                if capture.private
+            }
+
+            def variable(
+                identity: str | None, name: str, names: frozenset[str] = frozenset(private_names)
+            ) -> tuple[str | None, str]:
+                return (identity if name in names else None, name)
+
+            required = {
+                variable(step.identityRef, name)
                 for step in case.cleanup
                 for namespace, name in VARIABLE.findall(step.model_dump_json())
                 if namespace == "vars"
-            } | {name for step in case.cleanup for name in step.requires}
+            } | {
+                variable(step.identityRef, name) for step in case.cleanup for name in step.requires
+            }
             required_steps = {name for step in case.cleanup for name in step.dependsOn}
             authentication = []
             for step in reversed(case.steps):
                 if not (
                     isinstance(step, HttpStep)
                     and step.role == "authentication"
-                    and (required.intersection(step.captures) or step.id in required_steps)
+                    and (
+                        required.intersection(
+                            variable(step.identityRef, name) for name in step.captures
+                        )
+                        or step.id in required_steps
+                    )
                 ):
                     continue
                 authentication.append(step)
-                required.difference_update(step.captures)
+                required.difference_update(
+                    variable(step.identityRef, name) for name in step.captures
+                )
                 required.update(
-                    name
+                    variable(step.identityRef, name)
                     for namespace, name in VARIABLE.findall(step.model_dump_json())
                     if namespace == "vars"
                 )
-                required.update(step.requires)
+                required.update(variable(step.identityRef, name) for name in step.requires)
                 required_steps.update(step.dependsOn)
             self.state("running")
             for step in reversed(authentication):
@@ -492,6 +540,7 @@ class Runner:
                         {
                             "caseId": case.id,
                             "stepId": step.id,
+                            "identityRef": step.identityRef,
                             "state": "unknown",
                             "reason": "original_credential_not_persisted",
                         }
@@ -540,6 +589,7 @@ class Runner:
                     {
                         "caseId": case.id,
                         "stepId": entry["stepId"],
+                        "identityRef": entry.get("identityRef"),
                         "runId": self.run_id,
                         "state": "unknown",
                         "reason": "cleanup_credential_revocation_unverified",

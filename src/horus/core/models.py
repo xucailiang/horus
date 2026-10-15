@@ -1,5 +1,5 @@
 import re
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 from regress import Regex, RegressError
@@ -139,11 +139,20 @@ class Request(Model):
 
 
 class Capture(Model):
+    """Authentication captures are private to the selected identity and omitted from the ledger.
+
+    Other captures are case data; secret=true redacts them and omits their ledger values.
+    """
+
     jsonPointer: str | None = None
     header: str | None = None
     status: bool = False
     secret: bool
     purpose: str
+
+    @property
+    def private(self) -> bool:
+        return self.purpose == "authentication"
 
     @model_validator(mode="after")
     def one_source(self) -> Self:
@@ -245,6 +254,7 @@ class LoadStep(Model):
     assertions: list[Assertion] = Field(min_length=1)
     loadProfile: LoadProfile
     thresholds: Thresholds = Field(default_factory=Thresholds)
+    identityRef: str | None = None
 
     @model_validator(mode="after")
     def supported_regex(self) -> Self:
@@ -331,6 +341,21 @@ class ResourceMetrics(Model):
         return self
 
 
+class IdentityProfile(Named):
+    """Map local credential aliases to environment secretBindings names, never values.
+
+    Steps select identityRef; ${secrets.username} resolves through this profile's username alias.
+    Authentication captures are private to that identity within the case.
+    """
+
+    id: str = Field(min_length=1)
+    credentialRefs: dict[
+        Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")],
+        Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")],
+    ]
+    evidenceRefs: list[str] = Field(min_length=1)
+
+
 class Plan(Model):
     """Executable plan. Dynamic values use ${vars.name}, ${secrets.binding}, ${run.id}.
 
@@ -345,6 +370,7 @@ class Plan(Model):
     coverage: Coverage
     cases: list[Case] = Field(min_length=1)
     supportingContext: list[SupportingContext] = Field(default_factory=list)
+    identityProfiles: list[IdentityProfile] = Field(default_factory=list)
     resourceMonitoring: ResourceMonitoring | None = None
     parentPlanRef: str | None = None
     changeReason: str | None = None

@@ -48,6 +48,15 @@ finally cleanup. Use capture purpose `authentication` for credentials and
 include deletion verification in the failure path when required. Do not repeat an
 operation using a token already revoked by an earlier step.
 
+When multiple accounts are needed, declare `identityProfiles` with `id`, `description`,
+`credentialRefs` (alias → environment secretBindings name), and evidence. Select
+`identityRef` on each HTTP, load, and cleanup step. `${secrets.username}` resolves
+through the selected profile; authentication captures such as `${vars.accessToken}`
+are private to it and always redacted. An omitted identity uses a separate default
+scope. Other case data can connect identities, including sensitive business data
+marked `secret=true`; that marker redacts and omits its ledger value. Do not reuse
+another account's credential capture. Show these selections during review.
+
 Negative cases need explicit error expectations. HTTP 200 alone is not a data pass.
 For string formats, `operator=regex` takes a plain ECMAScript Unicode pattern in
 `expected` (no `/` delimiters, at most 512 characters). It searches a JSON Pointer

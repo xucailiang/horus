@@ -24,6 +24,7 @@ flowchart LR
 | `core/store.py` | Content hashes, atomic writes, file locking, project-scoped references |
 | `core/runs.py` | Idempotent starts, persistent state, cancellation, cleanup recovery, report attachments |
 | `core/runner.py` | Variable resolution, execution, captures, assertions, cleanup, reports |
+| `core/values.py` | Case data, identity scopes, credential aliases, dynamic values, redaction |
 | `adapters/` | OpenAPI discovery and bounded Hurl/k6 subprocess adapters |
 | `worker.py` | Detached run ownership, heartbeat, project execution lease |
 | `mcp/server.py`, `cli.py` | Transport and command interfaces to the same core |
@@ -38,6 +39,14 @@ A plan contains business understanding, evidence, coverage mappings, cases,
 requests, captures, assertions, cleanup, and optional load/resource settings.
 Dynamic values use `${vars.name}`, `${secrets.binding}`, and `${run.id}`.
 A full placeholder preserves its JSON type; `$${...}` represents a literal.
+
+Identity profiles map credential aliases to configured binding names. Each HTTP,
+load, and cleanup step selects its identity explicitly. Case contexts combine
+shared business data with only that identity's authentication captures and aliases.
+An omitted identity uses a separate default scope. `purpose=authentication` controls
+credential isolation and redaction; `secret=true` on other data controls redaction
+and persistence without changing its case scope. Validation checks variable sources
+within these same scopes before review, including assertions and cleanup inputs.
 
 Sources, configs, plans, review bundles, and decisions are immutable and addressed
 by SHA-256 over canonical JSON. References are checked within the current project.
@@ -74,6 +83,8 @@ original `run.id`, and runs approved cleanup. Required authentication steps and
 their authentication predecessors may run only within `cleanupAllow`; preparation
 and exercise steps are never replayed. Captured credentials remain available to
 cleanup even when another authentication assertion fails.
+Authentication predecessors are selected by both identity and variable name, so
+repairing one account cannot satisfy another account's credential dependencies.
 
 Recovery does not reconstruct secret IDs or lost sessions. Unknown original writes,
 unrecoverable credentials, and unverified cleanup remain in the recovery report.
@@ -107,9 +118,8 @@ verdict. horus does not implement an SSH service or remote monitoring agent.
 
 ## Current limits
 
-HTTP and load steps are implemented. Identity profiles, conditional branches,
-bounded polling and parallel functional cases
-remain development work. Common Swagger UI discovery
+HTTP/load steps and identity profiles are implemented. Conditional branches,
+bounded polling and parallel functional cases remain development work. Common Swagger UI discovery
 patterns are supported; arbitrary dynamic pages and external schema references
 may require a direct, self-contained API definition.
 
