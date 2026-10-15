@@ -33,7 +33,7 @@ Regression approvals are explicitly `test-only`. Normal execution rejects them
 unless `HORUS_TEST_MODE=1`; the MCP decision tool does not expose this source.
 They are never counted as actual human approval.
 
-## Base-wheel / CI replay
+## Base-wheel replay
 
 `tests.acceptance.verify_wheel` creates a clean Python 3.12 environment, exports
 hash-locked base dependencies from `uv.lock`, and installs the built wheel without
@@ -42,8 +42,9 @@ package, and runs normal and data-error scenarios through the CLI.
 
 The expected exit codes are 0 and 1 respectively, and both runs must remove their
 records and revoke their sessions. No model API, MCP server, or business source
-checkout is needed. This checks the platform; ordinary business CI targets an
-already deployed test service and does not have to launch the fixture.
+checkout is needed. The same CLI can replay a reviewed plan against an already
+deployed test service. The project uses local verification and has no hosted CI
+pipeline.
 
 ## Real Codex / Claude Code acceptance
 

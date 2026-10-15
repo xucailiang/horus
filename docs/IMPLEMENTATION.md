@@ -40,6 +40,8 @@
 
 ## 当前证据
 
+用户确认项目保持轻量，本阶段不部署 CI；GitHub Actions 已移除，本地验证流程保留。
+
 已有严格模型/内容完整性、stdio MCP、随包 Skill、OpenAPI/Swagger UI URL 导入、
 Hurl 功能链路、k6 并发指标及阈值、独立 Worker、启动去重、取消清理和自动报告。
 正常/数据错误/延迟及跨项目、审核门槛等场景已有自动测试。基础 wheel 在干净 Python 3.12

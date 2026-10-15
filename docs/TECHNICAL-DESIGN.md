@@ -1,5 +1,7 @@
 # horus 技术方案：业务理解、计划审核与确定性执行
 
+当前范围：本阶段不建设 GitHub Actions 等 CI 流水线，使用本地测试、静态检查和打包验证。原设计中的 CI 部分仅作为后续参考。
+
 版本 v0.4，2026-10-15。状态：待实施技术方案。当前已保存文档及 .python-version；下述命令和工具是约定接口，程序尚未实现。
 
 依据：[PRD v0.7](PRD-horus.md)、[ADR-0003](decisions/0003-autonomous-workflow-and-python312.md) 与 [ADR-0004](decisions/0004-mcp-primary-workflow.md)。主使用路径及两客户端接入示例见 [Agent + MCP 链路](AGENT-MCP-WORKFLOW.md)。首个正式交付 M1 包含 MCP Server、CLI、Skill、自动接入、业务理解与人工审核、完整功能链路、基础并发压测、自动报告和两个后端的通用性验收，不单独建设 PoC。

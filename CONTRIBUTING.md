@@ -23,6 +23,9 @@ The installer fetches pinned official Hurl/k6 binaries and verifies their SHA-25
 checksums. Existing binaries can be supplied through `HORUS_HURL_BIN` and
 `HORUS_K6_BIN`. macOS and Linux are the current supported platforms.
 
+There is no hosted CI pipeline at this stage. Run the relevant checks locally
+before committing.
+
 ## Changes and pull requests
 
 - Keep changes small and explain the concrete behavior they change.

@@ -84,4 +84,4 @@ permissions still apply. Plan, target, or scope changes need another review.
   to retry blindly. Include authorized resource observations and their limitations.
 - Finish and deliver this run first. Additional tests form a separate revised plan
   with reasons and fresh confirmation; do not extend the approved run indefinitely.
-  CLI supports setup and CI replay, not missing steps in the normal MCP workflow.
+  CLI supports setup and repeatable replay, not missing steps in the normal MCP workflow.

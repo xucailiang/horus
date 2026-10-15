@@ -1,5 +1,7 @@
 # horus：Agent + MCP 主使用链路
 
+当前范围：本阶段不建设 GitHub Actions 等 CI 流水线，使用本地测试、静态检查和打包验证。原设计中的 CI 部分仅作为后续参考。
+
 2026-10-15。MCP、Skill 和首条执行链路已实现，M1 仍在验收；具体证据见 IMPLEMENTATION.md。
 
 ## 1. 产品入口
