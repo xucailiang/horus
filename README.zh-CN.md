@@ -1,85 +1,49 @@
 # horus
 
-在你写代码的地方，把测试也做起来。
+[English](README.md) · [安装与使用](docs/usage.md) · [架构说明](docs/architecture.md)
 
-[English](README.md) · [安装与使用](docs/usage.md) · [测试流程](docs/testing.md) · [MIT](LICENSE)
+horus 是一个通过 MCP 接入 Codex、Claude Code 的 AI 原生接口测试平台。
+在开发服务的同一段对话里，理解业务规则和接口调用关系，完成功能检查与基础并发测试。
 
-horus 是一个基于 Codex、Claude Code 等编程工具的 AI 原生接口测试平台。
-你可以在同一段对话里讨论需求、修改代码，再验证做出来的东西是否符合预期。
-提供接口定义和必要的业务说明，Agent 据此设计测试；你看过并确认计划后，
-horus 完成执行，把结果带回对话。
+提供 OpenAPI/Swagger 定义和需要验证的业务行为，Agent 据此提出测试计划。
+你确认后，horus 用 Hurl 和 k6 执行测试，清理测试数据，再交付报告。
 
-测试需要先弄清楚业务应该怎样运作。创建一个资源，可能要检查谁有权访问、
-后续读到的数据是否一致，也要考虑中途失败后怎样清理。Agent 需要把这些规则
-落实到具体的请求和检查中，说明依据，也交代推断和未知项。审核时，你既能看懂
-它准备做什么，也能判断它是否理解了要测的业务。
-
-这些工作会保存在测试计划里。需要回归时，可以检查预期和依据，重新执行，
-或在需求变化时修订。报告留下实际发生的事情：检查了什么、哪里失败、清理是否
-完成，以及哪些范围还没有测到。Agent 可以拿着这些证据继续排查代码、提出补测。
-horus 想让开发过程中积累的业务理解，也成为验证软件的一部分。
-
-## 如何使用
-
-日常使用从一个 OpenAPI/Swagger 定义链接或常见 Swagger UI 链接开始。业务约定可以
-直接在聊天里补充；有需要时，Agent 用宿主已有工具阅读源码。测试预期以需求和接口
-约定为依据，源码结论作为补充资料随计划保存。被测服务可以用 Rust、Go、TypeScript、
-Python 等语言编写，只要提供 HTTP API，就使用同一套接入方式。
-
-Agent 通过 MCP 调用 horus，随包提供的 Skill 引导它理解业务、设计测试并交付报告。
-计划写明业务规则及其依据、请求、测试数据、断言、清理方式、负载和未覆盖项。
-计划先直接显示在对话里，方便你逐项阅读和修改；确认后才保存并执行。
-确认针对刚看过的版本和范围；修改了计划、目标或并发设置，就需要重新审核。
-
-计划可以在声明的身份间切换，用同一份数据验证拥有者和其他用户的权限。
-每个身份保留自己的认证变量，资源 ID 等业务数据在用例内传递。
-
-计划也可以按已读取的状态选择审核过的路径：任务已完成就验证结果，还在处理中就
-轮询明确允许的只读接口。查询间隔、次数和时限都写在计划里，中间响应只记录进展，
-任务完成后再检查最终数据。
-
-确认后，Worker 按计划准备数据，用 Hurl 执行 HTTP 检查，用 k6 完成基础并发测试，
-最后清理并生成报告。运行按项目隔离，状态和变量不会在不同运行间混用。
-每轮测试都有自己的目录，测试计划和报告均保存为 Markdown，语言跟随当前对话。
-计划保留完整 Mermaid 调用图，报告使用业务简图。报告先给结论、问题和关键数据，
-每组业务结果占一行；逐步检查与证据放在同目录的 details.md，另保留 JSON 和 JUnit。
-已审核计划还能导出、导入，通过基础 CLI 重跑，无需 MCP 或模型。
-
-独立的功能用例可以同时执行，审核时选择一个或两个并行，清理也占用名额。
-各用例使用自己的数据和凭据。负载用例等前一组执行并清理完毕后独占运行，
-测量期间不会混入其他用例的准备或清理请求。
-
-宿主断开后，运行仍可继续，重新连接后可以查询进度；重复的启动请求会返回原运行。
-Worker 异常退出时会停止对应引擎，取消和清理也都有时限。
-
-运行中断后，可以根据账本中保存的资源 ID，单独执行原计划批准的清理动作。
-丢失的凭据、结果不明的写入仍会列在报告中，不能据此保证所有资源都已清除。
-
-如果希望结合目标机器的资源消耗分析结果，可以授权宿主 Agent 通过 SSH 采集 CPU、
-GPU 和内存数据。短时基线用于讨论并发设置，运行期观测写入报告；已经批准的并发不会
-被悄悄调整。
-
-horus 在本地运行，用文件保存状态。宿主 Agent 沿用已有的模型、对话和源码阅读能力
-理解业务、设计测试，horus 负责按审核后的计划执行，并留下可供核查的结果。
-
-## 开发与安装
-
-在项目目录中，使用 Python 3.12 和 uv 0.9.11 安装：
-
-```sh
-uv sync --python 3.12 --frozen --extra mcp --group dev
-uv run python scripts/install_engines.py
-uv run horus mcp --workspace /absolute/path/to/test-workspace
+```text
+接口定义 → Agent 设计计划 → 人工确认 → Hurl + k6 → 测试报告
 ```
 
-安装脚本需要 GitHub CLI（gh），会下载官方 Hurl 8.0.1、k6 2.3.0 并校验 SHA-256。
-目前支持 macOS 和 Linux，也可用 HORUS_HURL_BIN / HORUS_K6_BIN 指向已有的对应版本。
+## 功能
 
-MCP 配置和 Skill 安装是两步。运行 `uv run horus skill` 查看随包 Skill 位置，
-安装到 Codex 的 `~/.agents/skills/horus` 或 Claude Code 的 `~/.claude/skills/horus`。
-两客户端的配置参考 [接入说明](docs/AGENT-MCP-WORKFLOW.md)。
+- **业务逻辑与调用链。** Agent 根据需求和接口约定设计请求与检查，必要时参考源码。
+  计划记录依据、假设和未覆盖项。
+- **功能测试。** 检查返回数据、资源权限、状态变化、条件分支和异步流程，包含数据准备与清理。
+- **并发测试。** 执行前确定并发数、迭代次数和限制，检查延迟、请求错误、数据错误及完成次数。
+  经授权后，可通过 SSH 补充目标机器的资源观测。
+- **重复执行。** 每轮测试独立保存状态和结果。已审核计划可导出，通过 CLI 重跑，无需 MCP 或模型。
+  中断后可单独尝试清理，结果不明的操作会保留在报告中。
 
-配置好后，可以在编程 Agent 中这样开始：
+horus 在本地运行，使用宿主 Agent 已有的模型和工具。目前为 alpha 版本，运行环境为 macOS 或
+Linux；被测服务的编程语言不限，接口范围为 HTTP/REST + JSON。具体限制见
+[架构说明](docs/architecture.md#current-limits)。
+
+## 快速开始
+
+需要 Python 3.12、uv 0.9.11 和 GitHub CLI（`gh`）。从源码安装：
+
+```sh
+git clone https://github.com/xucailiang/horus.git
+cd horus
+uv sync --python 3.12 --frozen --extra mcp --group dev
+uv run python scripts/install_engines.py
+```
+
+安装脚本下载官方 Hurl 8.0.1、k6 2.3.0，并校验 SHA-256。
+如已安装对应版本，可通过 `HORUS_HURL_BIN` 和 `HORUS_K6_BIN` 指定路径。
+
+按照[接入指南](docs/usage.md)配置 Codex 或 Claude Code 的 MCP，并安装随包提供的 Skill。
+两者需要分别配置；运行 `uv run horus skill` 可查看 Skill 位置。
+
+配置完成后，在编程 Agent 中发起测试：
 
 ```text
 用 horus 测试这个服务：<服务地址>，接口文档：<OpenAPI/Swagger 链接>。
@@ -88,29 +52,33 @@ MCP 配置和 Skill 安装是两步。运行 `uv run horus skill` 查看随包 S
 每轮计划和报告放在同一目录，用中文 Markdown 和 Mermaid 图展示业务逻辑与测试数据。
 ```
 
-## 当前状态
+Agent 先在对话中展示计划，确认后才保存并执行。确认只适用于当前版本和范围；修改后需要重新审核。
 
-首版核心流程已经可用，可从本仓库安装。Codex 和 Claude Code 均已通过 MCP 生成计划，
-在真实用户确认后完成功能测试、5 VU／100 次读取的并发测试、清理和报告读取。
-列表与详情的一致性补测也已单独审核并通过。Codex 还用同一套平台代码完成了第二个
-后端的权限、状态和异步工单测试。
+## 测试报告
 
-当前支持 HTTP/REST + JSON。本地回归覆盖错误响应、数据错误、延迟、有界轮询、分支、
-身份隔离、功能用例并行，以及无需模型的基础 wheel 回放。现有能力与限制见
-[架构说明](docs/architecture.md#current-limits) 和 [实施记录](docs/IMPLEMENTATION.md)。
-自动测试中的审核记录与真实人工验收分别留存。
+每轮测试的计划和结果放在同一目录，Markdown 文档的语言跟随当前对话：
 
-目前使用本地检查，不配置 CI 流水线：
+| 文件 | 内容 |
+| --- | --- |
+| `plan.md` | 已确认的计划、业务规则和完整 Mermaid 调用图 |
+| `report.md` | 结论、问题、业务结果、关键指标和业务简图 |
+| `details.md` | 逐步检查与执行证据 |
 
-```sh
-uv run pytest
-uv run ruff check src tests scripts
-uv run mypy src
-uv build
-```
+同目录还保留可执行计划、完整的脱敏 JSON 结果和 JUnit 报告。
+未执行的路径、尚未解决的清理问题会明确列出。
 
-[测试流程](docs/testing.md) 说明了自动回归、基础 wheel 验证与真实 Agent 验收各自
-要检查什么。产品边界见 [PRD](docs/PRD-horus.md)，实现约定见 [技术方案](docs/TECHNICAL-DESIGN.md)，
-进度见 [实施记录](docs/IMPLEMENTATION.md)。参与开发可参考 [贡献指南](CONTRIBUTING.md)。
+## 文档
 
-项目采用 [MIT 许可证](LICENSE)。
+- [安装、配置与 CLI 使用](docs/usage.md)
+- [测试与验证](docs/testing.md)
+- [架构与限制](docs/architecture.md)
+- [产品需求](docs/PRD-horus.md)与[技术设计](docs/TECHNICAL-DESIGN.md)
+
+## 参与贡献
+
+欢迎提交问题和 Pull Request。开发环境和本地检查见[贡献指南](CONTRIBUTING.md)。
+修改 README 时，请同步中英文版本。
+
+## 许可证
+
+[MIT](LICENSE)
