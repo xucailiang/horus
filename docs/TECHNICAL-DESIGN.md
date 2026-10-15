@@ -234,6 +234,8 @@ schemaVersion 固定为字符串 1，共享 Pydantic 严格模型是 CLI、MCP�
 
 BranchStep 仅按已存在变量选择一个预先审核的分支，未选分支为 skipped，原因 not_selected，不记为通过；后续使用的输出必须在所有可能路径定义，或有可校验的保护条件。校验拒绝循环依赖、不支持的动态动作和不明确的变量来源。
 
+当前分支契约要求显式 thenSteps、elseSteps 和 outputs；输出形如 {name, identityRef?}，认证变量保留身份，业务变量省略身份。两个路径分别验证、预算取最大值，外部只能直接使用已声明且两边均可提供的输出。其他路径变量通过 HTTP/Poll 的 requires 或 exists 条件保护；缺输入跳过该动作，清理仍列为未解决。分支条件不读取当前响应，需先捕获字段。路径引用采用 case.branch.then.step / case.branch.else.step，dependsOn 省略 case 前缀；嵌套沿用此形式。每 case 最多 2000 个步骤、8 层。运行前持久保存选择，修复沿原路径鉴权，不重新判断条件或使用未选路径；中断报告合并父分支已包含的事件，避免重复统计。
+
 PollStep 的 requestStep 必须同时在 runAllow 和 pollAllow 内；轮询只读性不能仅按 GET 判断。中间响应作为观测，until 满足后执行最终数据断言并导出声明变量；网络/协议/断言错误按计划策略记录，不能把错误统一当成“继续等待”。达到次数或时间上限即失败。分支按最坏路径、轮询按最大次数，加上鉴权/清理计算请求与耗时预算；不提供无限循环或运行时 Agent 生成新步骤。
 
 当前轮询契约：requestStep 是 role=exercise 的 HttpStep，identityRef 放在其中；至少一条非推断的状态断言作为每次响应守卫，其他断言仅在 until 满足后执行。条件使用 kind=compare/all/any/not；比较的左右操作数为 kind=literal/variable/response，分别读取原样 JSON、先前捕获变量和当前响应的 JSON Pointer/header/status。字面值不插值，所有条件输入都会检查；缺字段须显式使用 exists，否则报错。条件树最多 64 个节点、8 层；intervalMs 为 1–10000，maxAttempts 为 1–1000，timeoutMs 为 1–60000。超时包含请求、间隔和最终检查，取消可中断只读轮询后进入 finally。覆盖与账本使用外层 poll.id；中间观测不计为通过，最终检查失败仍保留可用于清理的捕获。

@@ -12,7 +12,7 @@ from horus.adapters.process import engine_path
 from horus.core.bundles import export_review
 from horus.core.service import Service
 from horus.core.store import atomic_write
-from tests.async_plan import reviewed_async_plan
+from tests.branch_plan import reviewed_branch_plan
 from tests.fixtures.reference_api import ReferenceServer
 from tests.fixtures.workflow_api import WorkflowServer
 from tests.support import FIXTURES, reviewed_regression_plan
@@ -78,14 +78,15 @@ assert [check["status"] for check in checks] == ["passed", "failed"]
         ], env=env, cwd=root, check=True)
         print("base wheel: Unicode regex pass/fail and matching child process verified")
         for mode, code, verdict in [
-            ("normal", 0, "passed"), ("data-error", 1, "failed"), ("workflow", 0, "passed"),
+            ("normal", 0, "passed"), ("data-error", 1, "failed"),
+            ("workflow-ready", 0, "passed"), ("workflow-wait", 0, "passed"),
         ]:
-            if mode == "workflow":
+            if mode.startswith("workflow"):
                 server = WorkflowServer(0, users={
                     env["HORUS_OWNER_USERNAME"]: env["HORUS_OWNER_PASSWORD"],
                     env["HORUS_OUTSIDER_USERNAME"]: env["HORUS_OUTSIDER_PASSWORD"],
-                })
-                planner = reviewed_async_plan
+                }, job_delay=0 if mode == "workflow-ready" else 0.4)
+                planner = reviewed_branch_plan
             else:
                 server = ReferenceServer(
                     0, mode=mode, username=env["HORUS_USERNAME"], password=env["HORUS_PASSWORD"]
@@ -114,6 +115,13 @@ assert [check["status"] for check in checks] == ["passed", "failed"]
                 assert not server.tokens
                 if isinstance(server, WorkflowServer):
                     assert not server.tickets and not server.jobs
+                    report_path = (
+                        Service(workspace).project(project).root / "runs" / summary["runId"]
+                    )
+                    report = json.loads((report_path / "report.json").read_bytes())
+                    branch = next(step for step in report["cases"][0]["steps"]
+                                  if step["id"] == "completion")
+                    assert branch["selected"] == ("then" if mode == "workflow-ready" else "else")
                 else:
                     assert not server.records
                 for path in workspace.rglob("*"):

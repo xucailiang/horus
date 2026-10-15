@@ -30,6 +30,11 @@ contracts are independent of fault modes. Tests cover:
   ticket. Cancellation stops polling and still deletes jobs/tickets and revokes sessions.
 - Poll input scopes, status guards, attempt/time budgets, final capture export,
   predicate types/composition, and redaction of intermediate conditions.
+- The workflow chooses direct verification or polling from an observed job state.
+  Both paths, stuck jobs, illegal edits, cancellation, and crash recovery are covered;
+  recovery must not run the alternative authentication path or resubmit work.
+- Branch output guarantees, identity scopes, existence guards, nested references,
+  unselected Poll reports, and a timeout that must block later writes while cleaning up.
 - HTTP 200 with incorrect data, excessive latency, and HTTP failures.
 - Review gates, immutable references, scope mismatch, and cross-project isolation.
 - Idempotent starts, disconnect/reconnect, cancellation during cleanup, and engine
@@ -51,10 +56,10 @@ They are never counted as actual human approval.
 `tests.acceptance.verify_wheel` creates a clean Python 3.12 environment, exports
 hash-locked base dependencies from `uv.lock`, and installs the built wheel without
 MCP extras. It verifies packaged Skill/JavaScript files, imports an existing review
-package, and runs normal, data-error, and two-identity asynchronous workflow scenarios
-through the CLI. The workflow includes polling, state checks, and independent load.
+package, and runs normal, data-error, and both conditional paths of a two-identity
+workflow through the CLI. The workflow includes polling, state checks, and independent load.
 
-The expected exit codes are 0, 1, and 0 respectively. Every run must remove its
+The expected exit codes are 0, 1, 0, and 0 respectively. Every run must remove its
 records/tickets and revoke its sessions. No model API, MCP server, or business source
 checkout is needed. The same CLI can replay a reviewed plan against an already
 deployed test service. The project uses local verification and has no hosted CI
@@ -105,7 +110,6 @@ an SDK-only round trip must be reported as incomplete native acceptance.
 ## Remaining acceptance work
 
 The first deterministic slice is implemented and locally verified. Complete
-two-client native generation and actual human approval, conditional branches in the
-second backend's workflow, and parallel functional cases before claiming
+two-client native generation and actual human approval, plus parallel functional cases before claiming
 the full M1 milestone. See [implementation notes](IMPLEMENTATION.md) for current
 evidence and gaps.

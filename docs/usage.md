@@ -176,6 +176,37 @@ poll and load durations must fit the run time limit; other HTTP actions also sha
 that limit, while finally cleanup has its own budget. Reports retain the attempts
 and observed conditions without counting pending responses as passing tests.
 
+## Choose between reviewed paths
+
+A `kind: branch` step declares a `predicate`, `thenSteps`, `elseSteps`, and `outputs`.
+For example, capture a job's state, check whether it is already done, then either
+verify the result directly or poll for completion. Both arrays belong to the
+reviewed plan; the Agent cannot create a new path during execution. Empty arrays
+and an empty output list are valid. Each case is limited to 2000 steps and depth 8.
+
+Branch conditions use the same typed comparisons as polling, with literals and
+prior variables only. A branch has no current response. Its `identityRef` selects
+the authentication variables it can read; shared business data stays visible.
+Inside a path, references include the branch and side, for example
+`caseId.completion.then.ready.state`. Nested paths continue the same pattern.
+`dependsOn` uses these paths without the case prefix.
+
+An output such as `{name: completedTicketId}` must be available after either path.
+Authentication outputs also specify their identity, such as
+`{name: accessToken, identityRef: owner}`. Other new captures stay conditional.
+To use them later, declare `requires` on an HTTP step (or a poll's `requestStep`),
+or check them with an `exists` branch condition. An existence condition proves
+availability on the appropriate path; `not`, `all` when true, and `any` when false
+can preserve that proof. Conditions still evaluate all their inputs.
+
+Missing required inputs skip the guarded action. Cleanup records missing inputs
+as unresolved, so a conditional cleanup skip cannot silently turn into a pass.
+Requests and declared durations use the larger branch budget. Reports retain the
+selected path and conditions; other paths are `skipped` with reason `not_selected`,
+including their JUnit entries. A routing decision is not an additional passing HTTP
+check. After interruption, cleanup uses the recorded path and approved actions,
+without reevaluating the condition or authenticating through an unselected path.
+
 ## CLI replay
 
 The CLI uses the same core and review gate:

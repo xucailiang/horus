@@ -21,6 +21,7 @@ flowchart LR
 | --- | --- |
 | `core/models.py` | Strict shared plan, policy, and resource-observation contracts |
 | `core/service.py` | Projects, API imports, validation, review materials, and approval gate |
+| `core/validation.py`, `core/steps.py` | Path scopes, output guarantees, operation policy and worst-path budgets |
 | `core/store.py` | Content hashes, atomic writes, file locking, project-scoped references |
 | `core/runs.py` | Idempotent starts, persistent state, cancellation, cleanup recovery, report attachments |
 | `core/runner.py` | Variable resolution, execution, captures, assertions, cleanup, reports |
@@ -68,6 +69,10 @@ Polling repeats only explicitly declared read operations within fixed attempt an
 time limits. Typed predicates inspect prior variables and the current response;
 status guards apply to every attempt, final assertions and captures to completion.
 Intermediate conditions are recorded as observations rather than passing checks.
+Branches select among frozen paths using prior variables. Declared outputs must
+exist on every path; conditional data requires an existence guard. Authentication
+keeps its identity scope across those paths. Reports distinguish unselected steps
+from passes, and recovery follows the persisted selection rather than rerouting.
 
 Closing an MCP connection does not stop a Worker. Ordinary cancellation stops new
 business actions and terminates active load. An in-flight bounded HTTP request can
@@ -122,8 +127,8 @@ verdict. horus does not implement an SSH service or remote monitoring agent.
 
 ## Current limits
 
-HTTP/load/poll steps and identity profiles are implemented. Conditional branches
-and parallel functional cases remain development work. Common Swagger UI discovery
+HTTP/load/poll/branch steps and identity profiles are implemented. Parallel
+functional cases remain development work. Common Swagger UI discovery
 patterns are supported; arbitrary dynamic pages and external schema references
 may require a direct, self-contained API definition.
 

@@ -34,6 +34,7 @@ async def test_empty_workspace_stdio_discovers_tools_and_preserves_project(tmp_p
         assert "identityRef" in schema["$defs"]["LoadStep"]["properties"]
         assert "until" in schema["$defs"]["PollStep"]["properties"]
         assert "ResponseOperand" in schema["$defs"]
+        assert "outputs" in schema["$defs"]["BranchStep"]["properties"]
         result = await client.call_tool(
             "horus_open_project",
             {

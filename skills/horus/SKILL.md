@@ -69,6 +69,17 @@ Read the exact predicate schema: `compare` has typed `literal`, `variable`, or
 All inputs are evaluated; use `exists` explicitly for optional response fields.
 Timeout, exhausted attempts, invalid responses, or engine errors end the poll and
 enter cleanup. Intermediate observations are evidence, not passing tests.
+For conditional actions, declare `kind=branch`, `predicate`, `thenSteps`, `elseSteps`,
+and `outputs` before review. A branch may read literals or prior variables through
+its `identityRef`, not a live response; capture the relevant response field first.
+Both paths are validated and frozen; budgets use the larger path. References inside
+them use `caseId.branchId.then.stepId` / `.else.stepId`, including nested branches.
+Declare outputs as `{name, identityRef?}`; authentication outputs retain their
+identity and business outputs omit it. Every output must exist on both paths.
+Other path-specific data needs an explicit existence guard: use HTTP/Poll request
+`requires`, or an `exists` branch condition. Missing required inputs skip that action;
+cleanup still reports missing inputs as unresolved. `not_selected` is not a pass.
+Recovery follows the recorded selection and cannot authenticate through the other path.
 For string formats, `operator=regex` takes a plain ECMAScript Unicode pattern in
 `expected` (no `/` delimiters, at most 512 characters). It searches a JSON Pointer
 or header string; use `^` and `$` for full formats. Missing/nonstring values fail.
