@@ -63,9 +63,9 @@ Skill 的共享正文来自随包分发的 skills/horus。Codex 可安装到 ~/.
 | 确认后保存 | 用户确认刚展示的草稿 | confirm_plan 校验 previewRef，保存同一计划并记录真实确认；修改后需重新展示 |
 | 执行 | Agent 一次提交 planRef、reviewRef、环境及 requestId | start_run 返回 runId；由 reviewRef 固定配置，独立 Worker 执行，不逐 HTTP 请求往返 Agent |
 | 等待 | Agent 自动有界等待并按需显示进展 | wait_run / get_run 返回状态、摘要；断开重连后可恢复查询 |
-| 报告 | 打开与当前对话同语言的 Markdown，先看 Mermaid 业务图，再看数据 | 返回 testDirectory、reportPath 和 artifactRef；get_artifact 可分页读取 Markdown |
+| 报告 | 打开与当前对话同语言的 Markdown，先看结论、问题和关键数据，再看业务简图 | 返回 testDirectory、reportPath 和 artifactRef；get_artifact 可分页读取 Markdown |
 
-每次执行作为一轮版本测试，计划和报告同放在 `projects/<projectRef>/.horus/runs/<runId>/`，新一轮不覆盖上一轮。目录含 `plan.md`、`plan.json`、`config.json`、`review.json`、`report.md`、`report.json` 和 `junit.xml`。计划和报告均为 Markdown，使用同一份已确认计划生成 Mermaid 图，展示分支、等待和清理；报告随后用表格对照预期与实际数据。
+每次执行作为一轮版本测试，计划和报告同放在 `projects/<projectRef>/.horus/runs/<runId>/`，新一轮不覆盖上一轮。目录含 `plan.md`、`plan.json`、`config.json`、`review.json`、`report.md`、`details.md`、`report.json` 和 `junit.xml`。计划使用完整 Mermaid 调用图，报告先给结论、问题和关键数据，再给业务简图。逐步记录和证据放在 details.md，可通过 detailsArtifactRef 分页读取。
 
 工具在协议中使用 horus_ 前缀。业务工具显式携带 projectRef，引用跨项目校验；同一个 MCP 服务处理不同项目时不依赖可被别的会话覆盖的全局“当前项目”。
 

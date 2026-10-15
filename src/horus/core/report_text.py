@@ -210,5 +210,22 @@ ZH = dict(
 )
 
 
+EN.update({
+    "other_limits": "Other scope limits", "peak": "Peak", "memory": "Memory",
+    "groups_passed": "test groups passed", "business_results": "Business results",
+    "business_goal": "Business goal", "key_evidence": "Key evidence",
+    "actions_passed": "actions passed", "more_issues": "More issues in details",
+    "overview_note": "Groups use independent data; load tests run exclusively. "
+    "Full call order: plan.md.",
+})
+ZH.update({
+    "other_limits": "其他范围限制", "peak": "峰值", "memory": "内存",
+    "groups_passed": "组测试通过", "business_results": "业务结果",
+    "business_goal": "业务目标", "key_evidence": "关键证据",
+    "actions_passed": "步通过", "more_issues": "其他问题见详情",
+    "overview_note": "各组独立准备数据；性能测试独占运行。完整调用和条件见 plan.md。",
+})
+
+
 def labels(language: str, overrides: dict[str, str] | None = None) -> dict[str, str]:
     return {**(ZH if language.split("-")[0].lower() == "zh" else EN), **(overrides or {})}

@@ -118,20 +118,21 @@ the approval. This uses the same trusted-local approval model as the legacy tool
 
 Each execution uses its existing `.horus/runs/<runId>/` directory as one test version.
 Before launching the Worker it snapshots `plan.md`, `plan.json`, `config.json` and
-`review.json` there. Completion adds `report.md`, `summary.json`, `report.json`,
+`review.json` there. Completion adds `report.md`, `details.md`, `summary.json`, `report.json`,
 and `junit.xml`. Start retries reuse that directory; new runs get a new one.
 `testDirectory`, `reportPath` (the Markdown file) and `artifactRef` are returned.
-Both plan and report use the same Mermaid generator over approved cases, preserving
-call order, branches, bounded waiting and cleanup. Results follow separately in
-localized tables. Diagram labels are encoded and can never introduce graph commands;
-external prose and technical evidence are escaped. No HTML renderer, CSS, JavaScript
-or browser dependency is needed. `plan.report.language` and the host-authored titles
-follow the conversation language; Chinese and English labels are built in and other
-locales require a full label dictionary. The report artifact is MCP-readable Markdown.
- Runtime payloads are redacted before persistence.
+The main report leads with conclusions, unresolved problems and key metrics,
+summarizes successful actions by business case, and uses one compact Mermaid
+business overview. The plan keeps the complete call graph and approved conditions.
+Step/assertion evidence goes into `details.md`, also available as `detailsArtifactRef`;
+full redacted records remain in JSON. No duplicated full-report appendix is embedded.
+Labels follow `plan.report.language`, with Chinese/English built in and explicit
+translations for other locales. Diagram labels and external evidence are escaped.
+Runtime payloads are redacted before persistence.
 Control fields and verdicts are kept separate from payload redaction.
-The JSON and paged Markdown artifact retain the plan's business understanding,
-sources, coverage mappings, assumptions, conflicts, and uncovered behavior. Observed
+The JSON retains the complete design and coverage context; the plan provides
+business rules, sources, assumptions and unknowns without repeating them in the
+short report. Detailed evidence is paged through its own Markdown artifact. Observed
 steps and assertions use separate indexes; skipped or unevaluated checks do not
 become passes. Load checks expose aggregate evidence from the engine, without
 inventing results for each assertion. Failure evidence includes redacted requests,

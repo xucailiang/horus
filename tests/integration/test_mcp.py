@@ -164,6 +164,11 @@ async def test_mcp_plan_review_execution_and_report_survive_client_disconnect(tm
                 )
             ).structured_content["payload"]
             assert "**Passed**" in report["content"]
+            details = (await client.call_tool("horus_get_artifact", {
+                "projectRef": project, "artifactRef": result["detailsArtifactRef"],
+            })).structured_content["payload"]
+            assert details["kind"] == "report-details"
+            assert '[details.md](details.md)' in report["content"]
             assert not server.tokens and not server.records
     finally:
         server.shutdown()

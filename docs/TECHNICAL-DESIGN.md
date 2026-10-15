@@ -528,9 +528,9 @@ Skill 在当前会话可用时调用 wait_run，以每次最多 30s 的有界等
 
 plan export 包含计划、所需 OperationCatalog/Schema 快照、依据摘要、审核记录和完整性 manifest，不包含凭据或完整源码仓库。CI 从受信来源取得包，import 验证哈希及引用闭包，保留已审核目标和配置。配置或审核不匹配立即阻塞，不从聊天重建步骤，也不要求 CI 重新分析代码。撤销通过受信版本库/产物更新传播，首版离线 CI 不承诺在线即时撤销。
 
-按用户确认，本阶段在本地启动永久 fixture 验证平台，不配置 CI 流水线。每次执行是一轮版本测试，使用独立的 `.horus/runs/<runId>/` 目录，确认后启动时存入 plan.md、plan.json、config.json 和 review.json，结束后同目录生成 report.md、summary.json、report.json 和 junit.xml。
+按用户确认，本阶段在本地启动永久 fixture 验证平台，不配置 CI 流水线。每次执行是一轮版本测试，使用独立的 `.horus/runs/<runId>/` 目录，确认后启动时存入 plan.md、plan.json、config.json 和 review.json，结束后同目录生成 report.md、details.md、summary.json、report.json 和 junit.xml。
 
-计划与报告的主要阅读入口为 Markdown。`plan.report.language` 跟随当前 Codex/Claude Code 对话，计划名称、case/step title、assertion description 同语言；中英文文案内置，其他语言由宿主按 Schema 的 x-labels 提供完整翻译。plan.md 和 report.md 由同一份已批准 cases 生成 Mermaid 流程图，包含分支、轮询和清理。报告先呈现业务理解和计划图，再用表格对照预期、实际结果和性能数据，原始技术证据放入可展开附录。未执行路径及未覆盖项仍保留。终态返回 testDirectory、指向 report.md 的 reportPath，以及可经 MCP 分页获取的 artifactRef。已审核计划仍可通过无模型的 CLI 回放。
+计划与报告的主要阅读入口为 Markdown。`plan.report.language` 跟随当前 Codex/Claude Code 对话，计划名称、case/step title、assertion description 同语言；中英文文案内置，其他语言由宿主按 Schema 的 x-labels 提供完整翻译。plan.md 保留完整 Mermaid 调用图，report.md 使用从已批准 cases 提取的业务简图。报告先给结论、问题、业务结果和关键性能数据，随后呈现简图。逐步断言、请求响应和技术证据单独放在 details.md，通过 detailsArtifactRef 分页读取，不重复嵌入主报告。未执行路径及未覆盖项仍保留。终态返回 testDirectory、指向 report.md 的 reportPath，以及可经 MCP 分页获取的 artifactRef。已审核计划仍可通过无模型的 CLI 回放。
 
 ## 7. M1 首个正式交付及验收
 

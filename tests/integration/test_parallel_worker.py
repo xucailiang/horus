@@ -48,9 +48,9 @@ async def test_real_workers_observe_parallel_limit_and_keep_k6_exclusive(paralle
     root = runs.root(refs[0], run["runId"])
     report = json.loads((root / "report.json").read_bytes())
     assert report["scheduling"]["peakFunctionalCases"] == limit
-    assert f"Functional cases: peak {limit}, approved limit {limit}" in (
-        root / "report.md"
-    ).read_text()
+    details = (root / "details.md").read_text()
+    assert f'"peakFunctionalCases": {limit}' in details
+    assert f'"functionalCaseLimit": {limit}' in details
     cases = {case["id"]: case for case in report["cases"]}
     assert (
         max(cases[name]["finishedAt"] for name in ("first", "second", "third"))

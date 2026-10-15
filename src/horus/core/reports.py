@@ -6,11 +6,10 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from horus.core.markdown_report import render_markdown
-from horus.core.models import BranchStep, LoadStep, Plan, ProjectConfig, ResourceMetrics, Step
+from horus.core.markdown_report import render_details, render_markdown
+from horus.core.models import BranchStep, LoadStep, Plan, ProjectConfig, Step
 from horus.core.presentation import mermaid_diagram, plan_document
 from horus.core.report_text import labels
-from horus.core.resources import resource_summary
 from horus.core.service import Service
 from horus.core.steps import request_action, walk_steps
 from horus.core.store import HorusError, atomic_write, file_lock
@@ -154,61 +153,6 @@ def report_context(service: Service, result: dict[str, Any]) -> Plan | None:
     return plan
 
 
-def design_lines(result: dict[str, Any]) -> list[str]:
-    lines = [f"Target: {result.get('target', 'unavailable')}",
-             f"Environment: {result.get('environment', 'unavailable')}", ""]
-    if issues := result.get("reportIssues"):
-        lines.extend(["Report context could not be fully verified:", "",
-                      "```json", json.dumps(issues, indent=2), "```", ""])
-    if not (design := result.get("testDesign")):
-        return lines
-    understanding = design["businessUnderstanding"]
-    lines.extend(["## Test design", "", design["name"], "", understanding["summary"], "",
-                  "Sources: " + ", ".join(design["sourceRefs"]), ""])
-    if design.get("parentPlanRef"):
-        lines.extend([f"Parent plan: {design['parentPlanRef']}",
-                      f"Change reason: {design['changeReason']}", ""])
-    for key in ["actors", "resources", "states", "flows", "rules", "dataDependencies",
-                "assumptions", "conflicts", "unknowns"]:
-        if items := understanding[key]:
-            lines.extend(["### " + key, ""])
-            for item in items:
-                label = item.get("id", item.get("resourceId", ""))
-                detail = item.get("description", json.dumps(item, ensure_ascii=False))
-                lines.append(f"- {label}: {detail}")
-                if item.get("impact"):
-                    lines.append(f"  Impact: {item['impact']}")
-                if item.get("evidenceRefs"):
-                    lines.append("  Evidence: " + ", ".join(item["evidenceRefs"]))
-            lines.append("")
-    lines.extend(["## Planned and observed coverage", "",
-                  "not_run and not_evaluated do not count as passes. Load assertions have "
-                  "aggregate evidence only; see their step metrics, not individual pass counts.",
-                  ""])
-    observed = result["executionCoverage"]["assertions"]
-    for mapping in design["coverage"]["flows"]:
-        lines.append(f"- Flow {mapping['flowId']}: " + ", ".join(mapping["caseIds"]))
-    for mapping in design["coverage"]["rules"]:
-        lines.append(f"- Rule {mapping['ruleId']}: " + "; ".join(
-            f"{ref}: {observed[ref]['status']}" for ref in mapping["assertionRefs"]
-            if ref in observed))
-    for mapping in design["coverage"]["dataDependencies"]:
-        lines.append(f"- Dependency {mapping['dependencyId']}: {mapping['captureRef']} → "
-                     + ", ".join(mapping["consumerStepRefs"]))
-    for item in design["coverage"]["uncovered"]:
-        lines.append(f"- Uncovered {item['itemId']}: {item['reason']}")
-    for item in design["supportingContext"]:
-        lines.extend(["", f"Supporting context {item['id']} ({item['source']}): {item['text']}"])
-    return [*lines, ""]
-
-
-def evidence_excerpt(value: Any) -> Any:
-    serialized = json.dumps(value, ensure_ascii=False)
-    if len(serialized) <= 8192:
-        return value
-    return {"excerpt": serialized[:8192], "truncated": True,
-            "totalCharacters": len(serialized), "fullEvidence": "report.json"}
-
 
 def snapshot_test(service: Service, root: Path, intent: dict[str, Any]) -> dict[str, str]:
     """One run is one test version: its plan and reports live in this same directory."""
@@ -253,54 +197,16 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
             if result["verdict"] == "passed":
                 result["verdict"] = "inconclusive"
     result.setdefault("finishedAt", time.time())
-    lines = [
-        f"# {result['verdict'].upper()}",
-        "",
-        f"Run: {result['runId']}",
-        f"Plan: {result['planRef']}",
-        f"Review: {result['reviewRef']}",
-        "",
-        "Coverage is limited to the cases and checks below.",
-        "",
-    ]
-    lines.extend(design_lines(result))
-    if scheduling := result.get("scheduling"):
-        lines.extend(
-            [
-                f"Functional cases: peak {scheduling['peakFunctionalCases']}, "
-                f"approved limit {scheduling['functionalCaseLimit']} (including cleanup).",
-                "Performance cases run exclusively; functional concurrency is not load evidence.",
-                "",
-            ]
-        )
     suite = ET.Element("testsuite", name="horus")
-    if result.get("cleanupFrom"):
-        lines.extend(
-            [f"Cleanup of: {result['cleanupFrom']}", "", "Business writes were not replayed.", ""]
-        )
     count = 0
     failures = 0
     for case in result["cases"]:
-        lines.extend([f"## {case['id']}", ""])
         for step in result_steps([*case["steps"], *case["cleanup"]]):
             if step.get("kind") in {"poll-attempt", "branch-selection"}:
-                lines.append(f"- {step['id']}: observation")
                 continue
             if step.get("kind") == "branch" and step["status"] not in {"error", "blocked"}:
-                lines.extend(
-                    [
-                        f"- {step['id']}: {step.get('selected', step.get('reason'))}",
-                        "",
-                        "```json",
-                        json.dumps(step.get("conditions", []), indent=2),
-                        "```",
-                        "",
-                    ]
-                )
                 continue
             count += 1
-            identity = f" ({step['identityRef']})" if step.get("identityRef") is not None else ""
-            lines.append(f"- {step['id']}{identity}: {step['status']}")
             node = ET.SubElement(suite, "testcase", classname=case["id"], name=step["id"])
             if step.get("identityRef") is not None:
                 properties = ET.SubElement(node, "properties")
@@ -310,58 +216,18 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
                 ET.SubElement(node, "failure", message=step["status"]).text = json.dumps(step)
             elif step["status"] in {"blocked", "skipped", "inconclusive"}:
                 ET.SubElement(node, "skipped", message=step["status"])
-            if "metrics" in step:
-                lines.extend(["", "```json", json.dumps(step["metrics"], indent=2), "```", ""])
             if step.get("kind") == "poll" and "observations" in step:
-                observations = json.dumps(step["observations"], indent=2)
-                lines.extend(
-                    [
-                        "",
-                        f"Polling: {step['attempts']} attempts",
-                        "",
-                        "```json",
-                        observations,
-                        "```",
-                        "",
-                    ]
-                )
-                ET.SubElement(node, "system-out").text = observations
-            if step["status"] != "passed" or step.get("failureSamples"):
-                details = {
-                    "reason": step.get("reason"),
-                    "assertions": [
-                        c for c in step.get("assertions", []) if c["status"] != "passed"
-                    ],
-                    "thresholds": [
-                        t for t in step.get("thresholds", []) if t["status"] != "passed"
-                    ],
-                }
-                for field in ("request", "response", "failureSamples"):
-                    if field in step:
-                        details[field] = evidence_excerpt(step[field])
-                if "failureSamples" in step:
-                    details["retainedFailureSamples"] = len(step["failureSamples"])
-                    details["samplingLimitPerVu"] = step.get("samplingLimitPerVu")
-                lines.extend(["", "```json", json.dumps(details, indent=2), "```", ""])
+                ET.SubElement(node, "system-out").text = json.dumps(step["observations"])
     suite.set("tests", str(count))
     suite.set("failures", str(failures))
-    if result.get("residue"):
-        lines.extend(
-            [
-                "## Recovery evidence",
-                "",
-                "These records include outcomes or resources that could not be fully resolved.",
-                "",
-                "```json",
-                json.dumps(result["residue"], indent=2),
-                "```",
-                "",
-            ]
-        )
-    if "resourceMetrics" in result:
-        lines.extend(resource_summary(ResourceMetrics.model_validate(result["resourceMetrics"])))
-    text = "\n".join(lines) + "\n"
-    text = render_markdown(result, plan.model_dump(mode="json") if plan else None, text)
+    raw = plan.model_dump(mode="json") if plan else None
+    text = render_markdown(result, raw)
+    details = render_details(result, raw)
+    result["detailsArtifactRef"] = service.project(result["projectRef"]).put(
+        "artifacts", {"kind": "report-details", "mediaType": "text/markdown", "content": details})
+    result["detailsPath"] = str(root / "details.md")
+    (root / "details.md").write_text(details, encoding="utf-8")
+    (root / "details.md").chmod(0o600)
     artifact = service.project(result["projectRef"]).put(
         "artifacts", {"kind": "report", "mediaType": "text/markdown", "content": text}
     )

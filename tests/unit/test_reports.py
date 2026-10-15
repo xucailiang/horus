@@ -69,8 +69,10 @@ def test_report_keeps_reviewed_business_context_and_distinguishes_unexecuted_che
     assert coverage["load.read.value"]["status"] == "not_run"
     text = (runner.root / "report.md").read_text()
     assert "http://127.0.0.1:1" in text
-    assert "Reads preserve the written value" in text
-    assert "lifecycle.read.value: failed" in text and "load.read.value: not_run" in text
+    assert "Reads preserve the written value" in (runner.root / "plan.md").read_text()
+    details = (runner.root / "details.md").read_text()
+    assert "lifecycle.read.value" in details and "load.read.value" in details
+    assert "Not passed" in details and "Not run" in details
     assert "List consistency has not been checked." in text and "Follow-up required." in text
     assert "testDesign" not in result and "executionCoverage" not in result
     assert result["verdict"] == "failed"
@@ -164,7 +166,7 @@ def test_unavailable_plan_cannot_suppress_a_failure_report(tmp_path, monkeypatch
     )
     assert result["verdict"] == "error"
     assert result["reportIssues"][0]["code"] == "integrity_error"
-    assert "integrity_error" in (runner.root / "report.md").read_text()
+    assert "integrity_error" in (runner.root / "details.md").read_text()
 
 
 def test_step_and_assertion_references_cannot_overwrite_each_other(tmp_path, monkeypatch):
@@ -203,7 +205,7 @@ def test_step_and_assertion_references_cannot_overwrite_each_other(tmp_path, mon
     ref = "lifecycle.read.value"
     assert report["executionCoverage"]["steps"][ref]["status"] == "failed"
     assert report["executionCoverage"]["assertions"][ref]["status"] == "passed"
-    assert ref + ": passed" in (runner.root / "report.md").read_text()
+    assert ref in (runner.root / "details.md").read_text()
 
 
 def test_mcp_artifact_delivers_bounded_failure_evidence_and_sampling_limits(tmp_path, monkeypatch):
@@ -242,7 +244,7 @@ def test_mcp_artifact_delivers_bounded_failure_evidence_and_sampling_limits(tmp_
     content = []
     offset = 0
     while offset is not None:
-        page = runner.service.get_artifact(runner.project_ref, result["artifactRef"], offset)
+        page = runner.service.get_artifact(runner.project_ref, result["detailsArtifactRef"], offset)
         content.append(page["content"])
         offset = page["nextOffset"]
     text = "\n".join(content)

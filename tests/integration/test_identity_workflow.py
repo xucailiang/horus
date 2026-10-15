@@ -63,7 +63,8 @@ async def test_real_worker_switches_identity_for_http_load_and_cleanup(workflow,
         "outsider",
     }
     assert all(step["status"] == "passed" for case in report["cases"] for step in case["cleanup"])
-    assert "(owner): passed" in (root / "report.md").read_text()
+    details = (root / "details.md").read_text()
+    assert '"identityRef": "owner"' in details and '"identityRef": "outsider"' in details
     assert 'name="identityRef" value="outsider"' in (root / "junit.xml").read_text()
     metrics = report["cases"][1]["steps"][-1]["metrics"]
     assert metrics["completedIterations"] == 20 and metrics["httpErrorRate"] == 0

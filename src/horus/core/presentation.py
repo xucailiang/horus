@@ -189,7 +189,9 @@ def markdown_text(value: Any) -> str:
     return encoded.replace('\r', ' ').replace('\n', ' ')
 
 
-def mermaid_diagram(cases: list[dict[str, Any]], text: dict[str, str]) -> str:
+def mermaid_diagram(
+    cases: list[dict[str, Any]], text: dict[str, str], *, brief: bool = False,
+) -> str:
     """A fixed graph grammar; plan strings can only enter quoted node labels."""
     lines = ['flowchart TD']
     index = 0
@@ -218,9 +220,9 @@ def mermaid_diagram(cases: list[dict[str, Any]], text: dict[str, str]) -> str:
         tails = incoming or []
         for step in steps:
             title = step_title(step, text)
-            if step.get("kind") == "branch":
+            if step.get("kind") == "branch" and (not brief or not step.get("title")):
                 title += " · " + predicate_text(step["predicate"])
-            elif step.get("kind") == "poll":
+            elif step.get("kind") == "poll" and not brief:
                 title += (" · " + predicate_text(step["until"]) +
                           f" · ≤ {step['maxAttempts']} × {step['intervalMs']} ms"
                           f" · ≤ {step['timeoutMs'] / 1000:g} s")
@@ -239,12 +241,15 @@ def mermaid_diagram(cases: list[dict[str, Any]], text: dict[str, str]) -> str:
         return tails
 
     for case_index, case in enumerate(cases):
-        lines.append(f'    subgraph c{case_index}["{label(case.get("title") or case["id"])}"]')
+        if not brief:
+            lines.append(f'    subgraph c{case_index}["{label(case.get("title") or case["id"])}"]')
         tails = chain(case["steps"])
         if case["cleanup"]:
             cleanup_start = node(text["cleanup"])
             for tail, caption in tails:
                 edge(tail, cleanup_start, caption, cleanup=True)
-            chain(case["cleanup"], [(cleanup_start, "")])
-        lines.append("    end")
+            if not brief:
+                chain(case["cleanup"], [(cleanup_start, "")])
+        if not brief:
+            lines.append("    end")
     return '```mermaid\n' + '\n'.join(lines) + '\n```'

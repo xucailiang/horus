@@ -57,9 +57,9 @@ Once approved, a Worker follows the plan, prepares the data, runs HTTP checks wi
 Hurl and basic load tests with k6, then cleans up and produces a report. State and
 variables are isolated between runs. Each test has one directory containing its
 plan and reports. Both the plan and report are Markdown, in the conversation
-language, with the same Mermaid diagrams showing business flow, branches, waiting
-and cleanup. The report follows with tables of expected and observed results and
-performance data. JSON and JUnit files are also included. Reviewed plans can be exported,
+language. The plan has the full Mermaid call graph; the report has a brief business
+overview. Verdict, problems and key metrics come first, with one row per business
+objective. Step evidence lives in `details.md`; JSON and JUnit files are also included. Reviewed plans can be exported,
 imported, and replayed through the base CLI without MCP or a model.
 
 Independent functional cases can run together, with an approved limit of one or

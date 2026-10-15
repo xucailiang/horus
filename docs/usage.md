@@ -99,7 +99,8 @@ projects/<projectRef>/.horus/runs/<runId>/
   config.json     configuration; credential binding names only
   review.json     approval and its scope
   report.json     full redacted result
-  report.md       main Markdown report with Mermaid diagrams
+  report.md       short report: verdict, problems, results and business overview
+  details.md      all step checks and bounded execution evidence
   junit.xml       machine-readable result
 ```
 
@@ -113,16 +114,21 @@ case/step `title`, and assertion `description`. English and Chinese UI text is b
 in; other languages require translations of all `report.labels` keys listed in the
 plan schema's `x-labels`. The report never guesses from the machine locale.
 
-Open `plan.md` and the returned `reportPath` (`report.md`) in a Markdown reader
-with Mermaid support. Both documents contain the same planned business-flow
-diagrams, generated from the approved cases: call order, condition branches,
-bounded waiting and cleanup. The report then uses tables to compare expectations
-with observations and show performance data. Unrun actions and unselected paths
-remain visible; load checks use aggregate evidence. Technical evidence is kept in
-an expandable appendix, with large excerpts marked and full data in `report.json`.
+Open the returned `reportPath` (`report.md`). It leads with the verdict, cleanup,
+failures or unresolved outcomes, then summarizes each business objective and key
+performance metrics. Successful actions are merged. A single Mermaid overview
+follows the important data; full call order and conditions remain in `plan.md`.
 
-`artifactRef` provides the Markdown through `horus_get_artifact`; follow every page
-before saving it. Sibling links require the other files from the test directory.
+Step/assertion records and bounded request/response evidence live in `details.md`,
+with full redacted data in `report.json`. The main report links them once. It never
+embeds a second complete report or generates alternate report versions. Scope
+limits are briefly listed; the approved plan retains their full context. Unrun
+and unselected paths never count as passed; load checks use aggregate evidence.
+
+`artifactRef` provides the short report via `horus_get_artifact`;
+`detailsArtifactRef` provides the separate details in the same way. Follow every
+page when reading either artifact. Sibling links require the rest of the directory.
+
 After restoring a project, use `horus_get_plan` to read a saved plan, following
 `nextOffset` to the end. Reading an old plan alone does not approve a new test.
 

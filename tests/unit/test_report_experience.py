@@ -89,16 +89,16 @@ def test_markdown_report_contains_plan_logic_localized_data_and_same_directory(
     )
     markdown = (runner.root / "report.md").read_text()
     assert "# 测试报告" in markdown
-    assert "业务与测试逻辑" in markdown and "测试数据" in markdown
-    assert markdown.index("## 业务与测试逻辑") < markdown.index("## 测试数据")
-    assert "登录并取得本轮凭据" in markdown  # Planned steps survive, even if never executed.
+    assert "业务与测试逻辑" in markdown and "业务结果" in markdown
+    assert markdown.index("## 需要关注") < markdown.index("## 业务与测试逻辑")
+    assert "登录并取得本轮凭据" in (runner.root / "details.md").read_text()
     assert "创建后应能读回相同记录" in markdown
     assert "未执行" in markdown and "未通过" in markdown
     assert "43" in markdown and "42" in markdown
     assert '<script>alert("unsafe")</script>' not in markdown
-    assert "&lt;script&gt;" in markdown
+    assert "&lt;script&gt;" in (runner.root / "plan.md").read_text()
     assert "```mermaid" in markdown and "flowchart TD" in markdown
-    assert "| 检查项 | 结果 | 预期 | 实际 |" in markdown
+    assert "| 检查项 | 结果 | 预期 | 实际 |" in (runner.root / "details.md").read_text()
     assert "https://cdn" not in markdown and "<script src=" not in markdown
     assert json.loads((runner.root / "plan.json").read_text()) == runner.service.project(
         runner.project_ref
@@ -109,7 +109,8 @@ def test_markdown_report_contains_plan_logic_localized_data_and_same_directory(
     def diagrams(content):
         return re.findall(r"```mermaid\n(.*?)\n```", content, re.S)
 
-    assert diagrams(markdown) == diagrams((runner.root / "plan.md").read_text())
+    assert len(diagrams(markdown)) == 1
+    assert "登录并取得本轮凭据" not in diagrams(markdown)[0]
     assert not (runner.root / "report.html").exists()
     assert "htmlArtifactRef" not in summary
     assert summary["testDirectory"] == str(runner.root)
@@ -184,7 +185,6 @@ def test_markdown_preserves_both_paths_bounded_wait_and_not_selected_status(tmp_
     assert "条件成立" in markdown and "条件不成立" in markdown
     assert branch["thenSteps"][0]["operationId"] in markdown
     assert "等待预期状态" in markdown and "未选择的分支" in markdown
-    assert str(branch["elseSteps"][0]["maxAttempts"]) in markdown
     assert "未执行" in markdown
 
 
@@ -214,7 +214,7 @@ def test_markdown_marks_large_evidence_excerpts_without_dropping_the_json_result
             ],
         },
     )
-    markdown = (runner.root / "report.md").read_text()
+    markdown = (runner.root / "details.md").read_text()
     assert "evidence-prefix" in markdown and "unretained-tail" not in markdown
     assert "truncated" in markdown and "report.json" in markdown
     assert (

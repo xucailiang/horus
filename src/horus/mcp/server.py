@@ -22,7 +22,8 @@ Call horus_preview_plan to validate without saving. Present its readable content
 in chat, never in an Ask/question tool card. Wait for a real human confirmation, then
 call horus_confirm_plan with the SAME draft, previewRef and the actual confirmation.
 Each run saves plan.md, plan.json and report.md in the returned testDirectory.
-Open reportPath for the user: Mermaid business logic comes before per-test data.
+Open reportPath: lead with verdict, failures and key metrics; use a brief business Mermaid.
+Detailed actions and evidence are in details.md / detailsArtifactRef, separate from the summary.
 Use ${vars.name}, ${secrets.binding}, ${run.id}; double-brace templates are unsupported.
 Read optional project code using your host's existing tools. Put relevant source findings
 or user chat material in plan.supportingContext; cite these as context:<id>. No repository
@@ -352,7 +353,7 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
             status=payload["status"],
             summary=payload.get("verdict", payload["status"]),
             payload=payload,
-            refs={"artifactRef": payload["artifactRef"]} if "artifactRef" in payload else {},
+            refs={k: payload[k] for k in ("artifactRef", "detailsArtifactRef") if k in payload},
         )
 
     @server.tool()

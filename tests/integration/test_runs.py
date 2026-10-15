@@ -67,7 +67,9 @@ async def test_detached_worker_cleans_reports_and_deduplicates_start(
         coverage = report["executionCoverage"]["assertions"]
         assert coverage["lifecycle.read.value"]["status"] == verdict
         assert coverage["load.read.value"]["status"] == "aggregate_only"
-        assert "Reads preserve the written value" in (run_root / "report.md").read_text()
+        assert "Reads preserve the written value" in (run_root / "plan.md").read_text()
+        assert (run_root / "details.md").is_file()
+        assert "detailsArtifactRef" in result
         assert "testDesign" not in result and "executionCoverage" not in result
     finally:
         server.shutdown()

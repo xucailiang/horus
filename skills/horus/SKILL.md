@@ -157,23 +157,31 @@ replay; they are not the normal way to submit a new test plan to the user.
   same start request returns the existing version. Never merge or overwrite an
   earlier run's plan/report. The directory contains `plan.md` (the confirmed text),
   `plan.json` (the executable snapshot), `config.json`, `review.json`, `report.md`,
-  `report.json`, and `junit.xml`, along with execution evidence.
+  `details.md`, `report.json`, and `junit.xml`, along with execution evidence.
 - Use **Markdown for both documents: `plan.md` and `report.md`**. Open/link
   `reportPath` with the host's file tools. If that path is inaccessible, retrieve
   `artifactRef` through `horus_get_artifact`, follow all pages, and save the exact
   Markdown locally. Copying the whole test directory also preserves sibling links.
-- Both documents must contain **Mermaid business/test flow diagrams generated from
-  the same approved cases**. Show call order, condition branches, bounded waiting
-  and cleanup. In the report, put business understanding and the planned diagrams
-  before the actual results. Keep planned logic unchanged so the two documents can
-  be compared. Show outcomes in separate tables; never redraw the plan to hide a
-  skipped, failed or unexecuted path. Use a Markdown reader with Mermaid support.
-- Write in the conversation language, in plain terms: what was tested, what was
-  expected, what happened, what failed, and what remains unknown. Explain metrics
-  naturally (e.g. “95% 的请求在 80 ms 内完成”). Use tables for checks and performance
-  data; put raw IDs, requests/responses and technical evidence in the appendix.
-  Include cleanup residue, untested behavior and authorized machine observations.
-  Unselected branches and unrun actions do not count as passes. A failed test is a
+- Keep **one current report**, with no alternate layouts or version-suffixed copies.
+  `report.md` is the short reading entry: verdict and cleanup first, then failures
+  or unresolved outcomes, one row per business objective, and key performance data.
+  Merge successful actions. Only failed checks need expected/observed values in
+  the main report; do not repeat login, status-code and ID checks step by step.
+- Both plan and report contain Mermaid diagrams from the approved plan. Keep the
+  full call graph in `plan.md`; use **one compact business overview** in the report,
+  after the important results. Preserve meaningful branches, waiting and cleanup,
+  while omitting repeated request mechanics. The overview must not change the
+  approved logic or imply that skipped/unselected paths passed.
+- Put all step/assertion records and bounded request/response evidence in the same
+  run's **`details.md`**, accessible via `detailsArtifactRef` and `detailsPath`.
+  `report.json` retains full redacted data. Link these once from the main report;
+  do not embed another complete report in an appendix. Display a few important
+  scope limits and link the approved plan for the rest. A normal small run should
+  be readable in one or two screens; genuine problems take priority over brevity.
+- Write in the conversation language, using business names and ordinary wording.
+  Explain performance naturally (e.g. “95% 的请求在 80 ms 内完成”). Include failed or
+  inconclusive results, unresolved cleanup and opted-in machine observations.
+  Unselected paths and unrun actions never count as passes. A failed test is a
   business result, not a broken MCP call to retry blindly.
 - If a finished run needs cleanup recovery, call `horus_cleanup_run` with the original
   run ID and a stable request ID, then wait and read its report. It uses the existing

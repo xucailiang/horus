@@ -49,7 +49,8 @@ async def test_real_polling_detects_stuck_jobs_and_illegal_state_changes(
     assert poll["observations"][0]["matched"] is False
     assert all(step["status"] == "passed" for step in case["cleanup"])
     assert not server.jobs and not server.tickets and not server.tokens
-    assert "Polling:" in (root / "report.md").read_text()
+    details = (root / "details.md").read_text()
+    assert '"observations"' in details and f'"attempts": {poll["attempts"]}' in details
     assert "<system-out>" in (root / "junit.xml").read_text()
     if mode == "stuck-job":
         assert poll["attempts"] == 10 and poll["reason"] == "poll_attempts_exhausted"
