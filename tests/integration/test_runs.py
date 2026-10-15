@@ -53,6 +53,14 @@ async def test_detached_worker_cleans_reports_and_deduplicates_start(
         assert (run_root / "report.md").exists()
         assert (run_root / "junit.xml").exists()
         assert "artifactRef" in result
+        report = json.loads((run_root / "report.json").read_bytes())
+        assert report["target"] == f"http://127.0.0.1:{server.server_port}"
+        assert report["testDesign"]["coverage"]["rules"][0]["ruleId"] == "value"
+        coverage = report["executionCoverage"]["assertions"]
+        assert coverage["lifecycle.read.value"]["status"] == verdict
+        assert coverage["load.read.value"]["status"] == "aggregate_only"
+        assert "Reads preserve the written value" in (run_root / "report.md").read_text()
+        assert "testDesign" not in result and "executionCoverage" not in result
     finally:
         server.shutdown()
         server.server_close()

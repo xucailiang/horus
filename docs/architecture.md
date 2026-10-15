@@ -24,7 +24,8 @@ flowchart LR
 | `core/validation.py`, `core/steps.py` | Path scopes, output guarantees, operation policy and worst-path budgets |
 | `core/store.py` | Content hashes, atomic writes, file locking, project-scoped references |
 | `core/runs.py` | Idempotent starts, persistent state, cancellation, cleanup recovery, report attachments |
-| `core/runner.py` | Variable resolution, execution, captures, assertions, cleanup, reports |
+| `core/runner.py` | Variable resolution, execution, captures, assertions, cleanup |
+| `core/reports.py` | Verdicts, factual reports, reviewed context and observed coverage |
 | `core/values.py` | Case data, identity scopes, credential aliases, dynamic values, redaction |
 | `adapters/` | OpenAPI discovery and bounded Hurl/k6 subprocess adapters |
 | `worker.py` | Detached run ownership, heartbeat, project execution lease |
@@ -110,6 +111,14 @@ Missing cleanup inputs cannot produce a pass. The original report stays intact.
 Runs produce `summary.json`, `report.json`, `report.md`, and `junit.xml`, plus an
 MCP-readable report artifact. Runtime payloads are redacted before persistence.
 Control fields and verdicts are kept separate from payload redaction.
+The JSON and paged Markdown artifact retain the plan's business understanding,
+sources, coverage mappings, assumptions, conflicts, and uncovered behavior. Observed
+steps and assertions use separate indexes; skipped or unevaluated checks do not
+become passes. Load checks expose aggregate evidence from the engine, without
+inventing results for each assertion. Failure evidence includes redacted requests,
+responses, retained sample counts, and sampling limits. Long evidence is explicitly
+excerpted in Markdown; the local JSON retains the full bounded engine result.
+The compact run summary omits the design and coverage tables.
 
 Regex assertions use ECMAScript Unicode semantics. Functional checks use the
 [`regress` binding](https://github.com/crate-py/regress); load checks use k6's

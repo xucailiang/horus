@@ -85,6 +85,10 @@ the confirmation phrase, does not authorize an undisplayed plan.
 After the real decision is recorded, it starts once with a stable request ID,
 waits in bounded calls, and retrieves the automatic report. Missing responses do
 not justify starting a second run. Reports remain available after reconnection.
+The report includes the reviewed business understanding, evidence references,
+planned coverage, and the checks actually evaluated. It keeps untested behavior
+visible. Failure requests, responses, and bounded load samples are readable through
+the paged MCP artifact; excerpts are marked, and local JSON retains the full result.
 
 Only place independent functional chains in separate cases. Consecutive functional
 cases share the reviewed `policy.limits.maxFunctionalParallelCases` limit (one or

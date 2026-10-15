@@ -46,6 +46,10 @@ contracts are independent of fault modes. Tests cover:
 - Explicit cleanup after a Worker crash, denied reauthentication, missing resource
   IDs, authentication chains, and cleanup after an authentication assertion fails.
 - Secret redaction without corrupting execution status or asset references.
+- Reports retain fixed business context and coverage, map interrupted events to
+  their original cases, and distinguish aggregate load evidence from individual
+  assertion results. Step/assertion references cannot overwrite each other, and
+  paged MCP reports include bounded failure evidence and sampling limits.
 - ECMAScript regex assertions over headers and JSON strings, matching the same
   corpus in functional and real k6 runs, plus timeout followed by finally cleanup.
 - Direct OpenAPI URLs and common Swagger UI discovery patterns.

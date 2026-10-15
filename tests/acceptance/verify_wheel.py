@@ -121,12 +121,18 @@ assert [check["status"] for check in checks] == ["passed", "failed"]
                 summary = json.loads(result.stdout)
                 assert summary["verdict"] == verdict, summary
                 assert not server.tokens
+                report_path = (
+                    Service(workspace).project(project).root / "runs" / summary["runId"]
+                )
+                report = json.loads((report_path / "report.json").read_bytes())
+                assert report["target"] == f"http://127.0.0.1:{server.server_port}"
+                assert report["testDesign"]["coverage"] == (
+                    service.project(project).get("plans", plan)["coverage"]
+                )
+                assert report["executionCoverage"]
+                assert "testDesign" not in summary
                 if isinstance(server, WorkflowServer):
                     assert not server.tickets and not server.jobs
-                    report_path = (
-                        Service(workspace).project(project).root / "runs" / summary["runId"]
-                    )
-                    report = json.loads((report_path / "report.json").read_bytes())
                     branch = next(step for step in report["cases"][0]["steps"]
                                   if step["id"] == "completion")
                     assert branch["selected"] == ("then" if mode == "workflow-ready" else "else")

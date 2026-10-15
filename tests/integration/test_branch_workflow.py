@@ -60,6 +60,13 @@ async def test_worker_selects_ready_or_waits_and_preserves_cleanup(
     skipped = [step for step in branch["steps"] if step["status"] == "skipped"]
     assert len(skipped) == 1 and skipped[0]["reason"] == "not_selected"
     assert all(entry["stepId"] != skipped[0]["id"] for entry in report["ledger"])
+    prefix = report["cases"][0]["id"] + "." + skipped[0]["id"]
+    assert report["executionCoverage"]["steps"][prefix]["status"] == "skipped"
+    assert all(
+        entry["status"] == "skipped"
+        for ref, entry in report["executionCoverage"]["assertions"].items()
+        if ref.startswith(prefix + ".")
+    )
     nodes = {node.attrib["name"]: node for node in ET.parse(root / "junit.xml").findall("testcase")}
     assert nodes[skipped[0]["id"]].find("skipped") is not None
     assert "completion" not in nodes  # A routing decision is not another passing HTTP test.

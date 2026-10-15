@@ -4,10 +4,13 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-from horus.core.models import ResourceMetrics
+from pydantic import ValidationError
+
+from horus.core.models import BranchStep, LoadStep, Plan, ResourceMetrics, Step
 from horus.core.resources import resource_summary
 from horus.core.service import Service
-from horus.core.store import atomic_write, file_lock
+from horus.core.steps import request_action, walk_steps
+from horus.core.store import HorusError, atomic_write, file_lock
 
 
 def result_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -52,12 +55,143 @@ def verdict(cases: list[dict[str, Any]]) -> str:
     return "passed" if "passed" in states else "inconclusive"
 
 
+def execution_coverage(
+    plan: Plan, cases: list[dict[str, Any]],
+) -> dict[str, dict[str, dict[str, Any]]]:
+    records = {
+        (step.get("caseId", case["id"]), step["id"]): step
+        for case in cases for step in result_steps([*case["steps"], *case["cleanup"]])
+        if step.get("kind") not in {"poll-attempt", "branch-selection"}
+    }
+    step_results: dict[str, dict[str, Any]] = {}
+    assertion_results: dict[str, dict[str, Any]] = {}
+    for case in plan.cases:
+        for cleanup in (False, True):
+            steps: list[Step] = [*case.cleanup] if cleanup else case.steps
+            for path, step in walk_steps(steps):
+                ref = case.id + "." + path
+                record = records.get((case.id, path), {})
+                status = record.get("status", "not_run")
+                entry = {"kind": step.kind, "status": status, "cleanup": cleanup}
+                if "reason" in record:
+                    entry["reason"] = record["reason"]
+                step_results[ref] = entry
+                if isinstance(step, BranchStep):
+                    continue
+                action = request_action(step)
+                entry["operationId"] = action.operationId
+                checks = {check["id"]: check for check in record.get("assertions", [])}
+                for assertion in action.assertions:
+                    check = checks.get(assertion.id)
+                    if check is not None:
+                        observed = check["status"]
+                    elif isinstance(step, LoadStep) and "metrics" in record:
+                        observed = "aggregate_only"
+                    elif status in {"not_run", "blocked", "skipped"}:
+                        observed = status
+                    else:
+                        observed = "not_evaluated"
+                    assertion_results[ref + "." + assertion.id] = {
+                        "kind": "assertion", "status": observed, "stepRef": ref,
+                        "stepStatus": status, "evidenceRefs": assertion.evidenceRefs,
+                        **({"reason": record["reason"]} if "reason" in record else {}),
+                    }
+    return {"steps": step_results, "assertions": assertion_results}
+
+
+def report_context(service: Service, result: dict[str, Any]) -> None:
+    store = service.project(result["projectRef"])
+    issues = []
+    try:
+        plan = Plan.model_validate(store.get("plans", result["planRef"]))
+        result["testDesign"] = {
+            key: value for key, value in plan.model_dump(mode="json").items()
+            if key in {"name", "sourceRefs", "businessUnderstanding", "coverage",
+                       "supportingContext", "identityProfiles", "parentPlanRef", "changeReason"}
+        }
+        result["executionCoverage"] = execution_coverage(plan, result["cases"])
+    except (HorusError, ValidationError) as exc:
+        issues.append({"code": exc.code if isinstance(exc, HorusError) else "invalid_plan",
+                       "location": "testDesign"})
+    try:
+        if "configRef" in result and "environment" in result:
+            config = store.get("configs", result["configRef"])
+            result["target"] = config["environments"][result["environment"]]["baseUrl"]
+        else:
+            review = store.get("reviews", result["reviewRef"])
+            result["target"] = review["scope"]["target"]
+    except (HorusError, KeyError) as exc:
+        issues.append({"code": exc.code if isinstance(exc, HorusError) else "missing_target",
+                       "location": "target"})
+    if issues:
+        result["reportIssues"] = issues
+        if result["verdict"] == "passed":
+            result["verdict"] = "inconclusive"
+
+
+def design_lines(result: dict[str, Any]) -> list[str]:
+    lines = [f"Target: {result.get('target', 'unavailable')}",
+             f"Environment: {result.get('environment', 'unavailable')}", ""]
+    if issues := result.get("reportIssues"):
+        lines.extend(["Report context could not be fully verified:", "",
+                      "```json", json.dumps(issues, indent=2), "```", ""])
+    if not (design := result.get("testDesign")):
+        return lines
+    understanding = design["businessUnderstanding"]
+    lines.extend(["## Test design", "", design["name"], "", understanding["summary"], "",
+                  "Sources: " + ", ".join(design["sourceRefs"]), ""])
+    if design.get("parentPlanRef"):
+        lines.extend([f"Parent plan: {design['parentPlanRef']}",
+                      f"Change reason: {design['changeReason']}", ""])
+    for key in ["actors", "resources", "states", "flows", "rules", "dataDependencies",
+                "assumptions", "conflicts", "unknowns"]:
+        if items := understanding[key]:
+            lines.extend(["### " + key, ""])
+            for item in items:
+                label = item.get("id", item.get("resourceId", ""))
+                detail = item.get("description", json.dumps(item, ensure_ascii=False))
+                lines.append(f"- {label}: {detail}")
+                if item.get("impact"):
+                    lines.append(f"  Impact: {item['impact']}")
+                if item.get("evidenceRefs"):
+                    lines.append("  Evidence: " + ", ".join(item["evidenceRefs"]))
+            lines.append("")
+    lines.extend(["## Planned and observed coverage", "",
+                  "not_run and not_evaluated do not count as passes. Load assertions have "
+                  "aggregate evidence only; see their step metrics, not individual pass counts.",
+                  ""])
+    observed = result["executionCoverage"]["assertions"]
+    for mapping in design["coverage"]["flows"]:
+        lines.append(f"- Flow {mapping['flowId']}: " + ", ".join(mapping["caseIds"]))
+    for mapping in design["coverage"]["rules"]:
+        lines.append(f"- Rule {mapping['ruleId']}: " + "; ".join(
+            f"{ref}: {observed[ref]['status']}" for ref in mapping["assertionRefs"]
+            if ref in observed))
+    for mapping in design["coverage"]["dataDependencies"]:
+        lines.append(f"- Dependency {mapping['dependencyId']}: {mapping['captureRef']} → "
+                     + ", ".join(mapping["consumerStepRefs"]))
+    for item in design["coverage"]["uncovered"]:
+        lines.append(f"- Uncovered {item['itemId']}: {item['reason']}")
+    for item in design["supportingContext"]:
+        lines.extend(["", f"Supporting context {item['id']} ({item['source']}): {item['text']}"])
+    return [*lines, ""]
+
+
+def evidence_excerpt(value: Any) -> Any:
+    serialized = json.dumps(value, ensure_ascii=False)
+    if len(serialized) <= 8192:
+        return value
+    return {"excerpt": serialized[:8192], "truncated": True,
+            "totalCharacters": len(serialized), "fullEvidence": "report.json"}
+
+
 def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[str, Any]:
     result["verdict"] = verdict(result["cases"])
     if (result["status"] in {"cancelled", "interrupted"} or result.get("residue")) and result[
         "verdict"
     ] == "passed":
         result["verdict"] = "inconclusive"
+    report_context(service, result)
     result.setdefault("finishedAt", time.time())
     lines = [
         f"# {result['verdict'].upper()}",
@@ -69,6 +203,7 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
         "Coverage is limited to the cases and checks below.",
         "",
     ]
+    lines.extend(design_lines(result))
     if scheduling := result.get("scheduling"):
         lines.extend([
             f"Functional cases: peak {scheduling['peakFunctionalCases']}, "
@@ -113,7 +248,7 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
                 lines.extend(["", f"Polling: {step['attempts']} attempts", "",
                               "```json", observations, "```", ""])
                 ET.SubElement(node, "system-out").text = observations
-            if step["status"] in {"failed", "error"}:
+            if step["status"] != "passed" or step.get("failureSamples"):
                 details = {
                     "reason": step.get("reason"),
                     "assertions": [
@@ -123,6 +258,12 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
                         t for t in step.get("thresholds", []) if t["status"] != "passed"
                     ],
                 }
+                for field in ("request", "response", "failureSamples"):
+                    if field in step:
+                        details[field] = evidence_excerpt(step[field])
+                if "failureSamples" in step:
+                    details["retainedFailureSamples"] = len(step["failureSamples"])
+                    details["samplingLimitPerVu"] = step.get("samplingLimitPerVu")
                 lines.extend(["", "```json", json.dumps(details, indent=2), "```", ""])
     suite.set("tests", str(count))
     suite.set("failures", str(failures))
@@ -149,7 +290,8 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
     atomic_write(root / "report.json", result)
     (root / "report.md").write_text(text)
     (root / "junit.xml").write_bytes(ET.tostring(suite, encoding="utf-8", xml_declaration=True))
-    summary = {k: v for k, v in result.items() if k != "cases"}
+    summary = {k: v for k, v in result.items()
+               if k not in {"cases", "testDesign", "executionCoverage"}}
     summary["counts"] = {"steps": count, "failures": failures}
     atomic_write(root / "summary.json", summary)
     atomic_write(root / "state.json", summary)
