@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from horus.adapters.hurl import build_url
+from horus.adapters.hurl import build_url, validate_headers
 from horus.adapters.process import MAX_OUTPUT, run_engine
 from horus.core.models import LoadStep
 from horus.core.store import HorusError
@@ -12,14 +12,12 @@ from horus.core.store import HorusError
 
 class K6Adapter:
     async def run(self, operation: dict[str, Any], base_url: str, step: LoadStep) -> dict[str, Any]:
-        if any(
-            a.jsonSchema is not None or a.elapsedMs or a.operator == "regex"
-            for a in step.assertions
-        ):
+        if any(a.jsonSchema is not None or a.elapsedMs for a in step.assertions):
             raise HorusError("unsupported_load_assertion")
         headers = dict(step.request.headers)
         if step.request.body is not None:
             headers.setdefault("Content-Type", "application/json")
+        validate_headers(headers)
         with tempfile.TemporaryDirectory(prefix="horus-private-") as temporary:
             root = Path(temporary).resolve()
             summary = root / "summary.json"

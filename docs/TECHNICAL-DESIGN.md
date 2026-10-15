@@ -91,7 +91,7 @@ pyproject.toml            wheel、horus 命令入口、mcp 可选依赖
 .python-version           统一 Python 3.12
 uv.lock                   锁定依赖
 src/horus/core/           项目、资料、知识、计划、审核、变量、策略、调度、报告
-src/horus/adapters/       Hurl、k6、Git 与文件访问
+src/horus/adapters/       Hurl、k6、OpenAPI URL 与文件访问
 src/horus/cli/            Typer 命令与退出状态
 src/horus/mcp/            FastMCP 工具注册与标准结果映射
 src/horus/worker/         独立运行、心跳和取消处理
@@ -106,43 +106,49 @@ docs/
 
 ### 3.1 保存方式
 
-MCP 默认以 horus mcp --workspace <absolute-path> 启动，工作区可为空。open_project 在服务端指定工作区下创建或恢复项目，返回持久 projectRef；所有业务工具显式带 projectRef，不使用跨会话可变的全局当前项目。--project 仅作为已存在单项目的启动便捷方式，不是首次接入前置条件。
+MCP 以 `horus mcp --workspace <absolute-path>` 启动，工作区可为空。
+项目身份持久保存，所有业务调用显式携带 projectRef，不依赖共享当前目录。
 
-每个被测系统建立自己的项目目录，与平台源码分开：
+```text
+workspace/projects/<projectRef>/project.json
+workspace/projects/<projectRef>/.horus/
+  sources/     接口定义与可选文档快照
+  configs/     目标、策略、凭据变量名称
+  plans/       含业务理解、依据和覆盖的计划
+  bundles/     固定审核范围和材料引用
+  reviews/     独立人工决定记录
+  artifacts/   审核材料和报告
+  requests/    幂等启动登记
+  runs/<runId>/ 状态、事件、报告和资源账本
+```
 
-~~~text
-project.yaml                 资料声明、操作范围、负载上限、凭据变量名
-plans/                       可版本管理的人类可读计划
-.horus/local.yaml          私有环境地址和本机路径覆盖
-.horus/sources/<ref>/      不可变资料快照及摘要
-.horus/knowledge/          规则、依赖、冲突和未知项
-.horus/plans/<ref>.json    已校验不可变计划
-.horus/reviews/<ref>/      版本绑定的审核材料、批准/拒绝记录
-.horus/runs/<runId>/       状态、脱敏事件、结果和资源清理账本
-reviews/                  可导出、纳入受信版本管理的审核材料与记录
-~~~
+内容寻址使用规范化 JSON 的 SHA-256；读取时验证哈希与项目归属。
+计划修订保存 parentPlanRef/changeReason，原内容不覆盖。哈希验证一致性，
+不证明审核人身份。原子写入与文件锁保护资产、启动登记和项目执行互斥。
 
-- 资料以 SHA-256 标记；源码另存仓库、ref、commit、路径。
-- 规范化 JSON 使用稳定键序后计算完整 SHA-256 形成 planRef；增补保存 parentPlanRef/changeReason，原版本不覆盖。
-- 审核记录独立于 Plan 保存，绑定 planRef 和审核范围；计划内容不能包含 approved=true 一类可自行生效的字段。导出的审核包用内容哈希检查传输一致性，不能因此声称证明了审核人身份。
-- 每轮 UUID runId、独立变量、数据标识和输出目录；不同 case 不共享动态资源。
-- 不可变对象独占创建，状态使用同目录临时文件加原子重命名；每轮事件由单 Worker 写 JSONL。
-- 本地脱敏结果保留至显式删除；CI artifact 默认保留 14 天。不引入后台历史清理服务。
-- 项目摘要持久保存来源、配置草案、知识、计划、审核和最近运行引用；重连/上下文压缩后可恢复，不从聊天重新构造运行变量。所有引用验证项目归属。
+源码由宿主按需读取，其结论随 supportingContext 保存；不保存或索引源码仓库。
+每轮及每个 case 使用独立变量，凭据仅在内存中解析，落盘前脱敏。
+本地结果保留至显式删除；不引入后台历史清理服务。
 
-### 3.2 资料和源码
+### 3.2 接口导入与可选上下文
 
-支持本地 OpenAPI 文件/可访问 URL、Markdown/纯文本说明、Git HTTPS/SSH 链接或本地 checkout。Git 使用现有 credential helper/SSH agent，固定 commit 后读取，不执行仓库脚本。
+主要接入 OpenAPI/Swagger 定义 URL 或常见 Swagger UI URL。受限 HTTP 获取解析 JSON/YAML，
+并从 UI 的 url/configUrl、初始化脚本或嵌入配置定位定义，不执行页面 JavaScript。
+存在多个定义时返回候选；无法解析时明确要求原始定义 URL，不猜接口或静默成功。
+本地规范文件保留为开发、离线及 fixture 的便捷输入。
 
-网络资料获取或仓库克隆可能较久，register_source 先保存准备任务并返回 sourceRef/status；get_context 可查询准备状态及就绪后的片段。相同资料请求复用准备任务，快照就绪并固定版本后才能被计划引用。协议握手和普通工具调用不等待完整仓库下载。
+校验 Swagger 2.0 / OpenAPI 3.0/3.1，建立 OperationCatalog：operationId、method、path、
+参数、鉴权、响应约定及来源。缺少 ID 时用 method:path，重复 ID 报错。保留原始方言，
+不把 Swagger 2.0 假装转换为 OpenAPI 3.1。外部引用不能由验证器任意联网加载；
+不支持的约束或引用显式返回问题，不能忽略后判为通过。
 
-校验并解析 OpenAPI，生成 OperationCatalog：operationId、method、path、参数、鉴权、响应约定与来源。缺少 ID 时使用稳定的 method:path，重复 ID 报错。Swagger 2.0 的 body/非 body 参数、definitions 与安全声明由适配器显式映射到目录，不假装原件已变成 OpenAPI 3.1。记录规范版本和映射，不自动修补文档让其看起来正确。
+源码由宿主 Codex/Claude Code 使用已有工具按需读取。聊天资料、业务说明及源码结论
+直接写入 Plan.supportingContext，包含 id、text、source 和可选 locator，依据用
+context:<id> 引用。接口定义的依据仍用 sourceRef#Lx。平台不建设 Git 克隆、源码索引、
+语言 AST 或额外知识渠道。未知项和冲突属于计划，随同审核。
 
-OpenAPI 3.0/3.1 的响应结构使用相应 OAS 验证器；显式 JSON Schema 断言必须声明方言。Swagger 2.0 的 JSON Schema Draft 4 子集映射保留 readOnly、format 等响应语义，扩展或不支持的约束返回问题，不能忽略后计为通过。外部引用仅由已注册资料的受限 registry 解析；禁止验证库自行联网取任意 $ref。三个规范版本分别留契约样例回归。
-
-引用只能读取已注册资料集合，外部文件/URL 由受限加载器处理。源码提供路径、文本检索和带行号片段，默认 200 行并支持分页，跳过依赖和构建产物。首版不建设所有语言 AST 分析器或向量库。
-
-知识记录 ruleId、描述、evidenceRefs、确定性级别和未知项。明确需求/接口约定优先；源码和响应辅助理解，不自动成为正确性标准。
+执行仅依赖 HTTP 接口约定，和被测后端语言、框架及业务无关；不要求安装或执行被测项目源码。
+明确需求/接口约定优先，源码是可选推断材料，不能以错误实现证明预期正确。
 
 ### 3.3 策略和凭据
 
@@ -194,7 +200,8 @@ schemaVersion 固定为字符串 1，共享 Pydantic 严格模型是 CLI、MCP�
 
 | 对象 | 必需内容 |
 | --- | --- |
-| Plan | name、sourceRefs、businessUnderstanding、coverage、cases、可选 identityProfiles；增补含 parentPlanRef/changeReason |
+| Plan | name、sourceRefs、businessUnderstanding、coverage、cases、可选 supportingContext/identityProfiles；增补含 parentPlanRef/changeReason |
+| SupportingContext | id、text、source=conversation/host-source/note、可选 locator；直接随计划保存 |
 | BusinessUnderstanding | summary、actors、resources、states、flows、rules、dataDependencies、assumptions、conflicts、unknowns；无项时空列表并说明资料限制 |
 | BusinessFlow / Rule | 稳定 id、描述、operationIds/状态关系、basis、evidenceRefs；basis 区分 contract/source-inference/observation/human-requirement |
 | DataDependency | 生产接口及字段、消费接口及位置、用途、生命周期、evidenceRefs |
@@ -231,7 +238,7 @@ PollStep 的 requestStep 必须同时在 runAllow 和 pollAllow 内；轮询只�
 ~~~yaml
 schemaVersion: "1"
 name: record-lifecycle
-sourceRefs: [spec_snapshot, requirements_snapshot, code_snapshot]
+sourceRefs: [spec_snapshot, requirements_snapshot]
 businessUnderstanding:
   summary: 测试用户通过鉴权创建独立记录，读取应保留写入值，最后删除记录并注销会话。
   actors: [{id: test-user, description: 使用配置凭据的测试用户}]
@@ -423,9 +430,9 @@ cleanup 按声明顺序执行，某步失败不阻止其他具备条件的清理
 
 MCP start_run 必须带 reviewRef 和 requestId，由审核记录取得固定 configRef，不隐式选取“最近批准”的配置；原子登记该项目的请求、参数摘要、runId 后由独占认领的独立 Worker 执行，完成启动握手再返回。相同 requestId/参数重试返回原 runId，参数不同返回 request_conflict；客户端收不到响应时不能新开一轮写入。CLI 同样通过核心的幂等启动入口。
 
-Worker 每 2s 更新心跳，独立进程会话并脱离 MCP 的 stdio/父进程生命周期；macOS/Linux 正常关闭宿主会话后的持续执行须实测。wait_run 超时或等待调用被取消不等于取消运行；只有 cancel_run 写入取消标志、停止新业务动作、终止执行子进程并尽力清理。
+Worker 每 2s 更新心跳，独立进程会话并脱离 MCP 的 stdio/父进程生命周期；macOS/Linux 正常关闭宿主会话后的持续执行须实测。wait_run 超时或等待调用被取消不等于取消运行；只有 cancel_run 写入取消标志、停止新增业务动作并终止负载。已发送的有界 HTTP 请求先完成捕获，再执行独立有界清理。
 
-超过 30s 无心跳且进程已不存在，查询标记 interrupted。强杀、断电或网络不可达时不保证清理成功；账本列出残留/不明资源。cleanup_run 使用已有账本及当前环境鉴权，不重新创建资源，不自动恢复可能重复写入的中间步骤。负载的 gracefulStop 设为 0，Worker 硬超时为配置 maxDuration 加 5s，然后进入清理；取消信号及非预期进程退出仍分别记录。
+引擎 guardian 通过管道监测 Worker 生存，Worker 消失即停止并回收引擎；guardian 继承项目锁，旧引擎退出前不允许同项目新运行进入。超过 30s 无心跳且进程已不存在，查询标记 interrupted。强杀、断电或网络不可达时不保证清理成功；账本列出残留/不明资源。cleanup_run 使用已有账本及当前环境鉴权，不重新创建资源，不自动恢复可能重复写入的中间步骤。负载的 gracefulStop 设为 0，Worker 硬超时为配置 maxDuration 加 5s，然后进入清理；取消信号及非预期进程退出仍分别记录。
 
 意外终止后的下一次查询或清理入口从事件与账本重建中断报告，不自动恢复写操作。reporting 不等待 LLM，AI 解释作为可选追加内容；新补测的待审核状态不影响本次运行完成或报告交付。
 
@@ -433,32 +440,25 @@ Worker 每 2s 更新心跳，独立进程会话并脱离 MCP 的 stdio/父进程
 
 ### 6.1 CLI
 
-约定命令，尚未实现：
+当前 CLI 与核心共用审核和运行逻辑，输出 JSON：
 
-~~~sh
-horus init ./my-tests
-horus doctor --project ./my-tests
-horus source add --project ./my-tests --kind openapi --uri ./openapi.yaml
-horus source add --project ./my-tests --kind git --uri <repository-url> --ref <commit-or-branch>
-horus plan save --project ./my-tests --file ./plans/lifecycle.yaml
-horus plan validate --project ./my-tests --ref <plan-ref>
-horus plan review --project ./my-tests --ref <plan-ref> --env test
-horus plan approve --project ./my-tests --ref <plan-ref> --env test --reviewer <human-id>
-horus plan reject --project ./my-tests --ref <plan-ref> --reason <review-comment>
-horus plan revoke --project ./my-tests --review <review-ref> --reason <review-comment>
-horus plan export --project ./my-tests --ref <plan-ref> --with-review --out ./reviewed-plan
-horus plan import --project ./ci-tests --bundle ./reviewed-plan
-horus run --project ./my-tests --plan-ref <plan-ref> --review-ref <review-ref> --env test --wait --json
-horus run status --project ./my-tests --id <run-id> --json
-horus run cancel --project ./my-tests --id <run-id>
-horus run cleanup --project ./my-tests --id <run-id> --env test
-horus report --project ./my-tests --id <run-id> --format markdown
-horus mcp --workspace /absolute/path/to/horus-workspace
-~~~
+```sh
+horus version
+horus skill
+horus mcp --workspace /absolute/path/to/workspace --read-root /absolute/path/to/docs
+horus plan approve --workspace <workspace> --project-ref <projectRef> --bundle-ref <reviewBundleRef>
+horus plan export --workspace <workspace> --project-ref <projectRef> --review-ref <reviewRef> --out reviewed.json
+horus plan import --workspace <ci-workspace> --bundle reviewed.json
+horus run --workspace <workspace> --project-ref <projectRef> --plan-ref <planRef> --review-ref <reviewRef> --env test
+horus status --workspace <workspace> --project-ref <projectRef> --run-id <runId>
+```
 
-plan save 返回内容哈希 planRef；review 生成材料，不产生批准。approve/reject/revoke 是直接人工 CLI 入口，approve 展示版本与范围并交互确认。Agent 对话中已对具体版本作出的明确确认，通过人工决定记录工具保存，无需重复运行 CLI。上述命令分别演示可用入口，不表示批准后应立即拒绝同一计划。
+CLI approve 完整展示材料后，等待用户输入“我确定”。日常 Agent 流程通过 MCP
+记录实际对话确认，无需再运行 CLI。run 默认等待，`--no-wait` 返回 runId，
+两者均使用固定审核范围；不允许命令行临时改目标、参数或并发。
 
-run 默认等待完成后返回结果摘要和自动生成的报告引用，--no-wait 返回 runId；两种模式都先经过 ReviewGate。report 用于查看或再次导出已有报告，不是完成测试的必要人工步骤。--json 的 stdout 只放机器结果；进度写脱敏 stderr。doctor 检查引擎/Python 3.12、项目和凭据变量是否存在，不输出凭据。
+资料接入、计划生成和取消目前走 MCP；doctor、修复清理等入口仍待实现。
+仅安装基础 wheel 即可回放审核包，不需要 FastMCP 或模型客户端。
 
 退出码：0 全部要求检查通过；1 功能/数据/性能阈值或清理失败；2 计划/配置/策略/依赖/引擎错误；3 只有阻塞/待判定、审核缺失/无效，或取消/中断。并存时优先级 2、1、3、0，报告仍保留全部结果。
 
@@ -470,28 +470,25 @@ run 默认等待完成后返回结果摘要和自动生成的报告引用，--no
 | horus_list_projects | query、cursor、limit | projectRef、摘要及分页 |
 | horus_open_project | 项目名称或 projectRef、createIfMissing | projectRef、持久上下文摘要、已有配置/资料/计划/审核/运行引用 |
 | horus_stage_project_config | 环境/目标、凭据绑定名称、资料声明、边界与预算草案 | configRef、缺口、范围摘要；不会直接启用权限 |
-| horus_register_source | kind、uri、ref | sourceRef、准备状态；就绪后版本与摘要 |
+| horus_import_api | URL | sourceRef、定义与操作目录；多定义时返回候选 |
+| horus_register_source | kind=openapi/markdown、uri | 本地允许根目录中的文档快照 |
 | horus_get_context | sourceRef、可选 operationId/path、offset、limit | 准备状态/摘要；就绪后接口/说明/源码片段与依据 |
-| horus_search_source | sourceRef、query、pathFilter、limit | 路径、行号、摘要和分页 |
-| horus_save_knowledge | rules、dependencies、unknowns、evidenceRefs | knowledgeRef、问题 |
-| horus_probe_operation | operationId、request、purpose | probeRef、脱敏响应和证据 |
 | horus_save_plan | 含 businessUnderstanding/coverage 的 plan、parentPlanRef、changeReason | planRef、校验及差异；不会批准 |
 | horus_validate_plan | planRef | 结构/引用问题、覆盖缺口、凭据变量名称、执行规模 |
 | horus_prepare_review | planRef、configRef、environment | reviewBundleRef、材料 artifactRef、scopeHash、awaiting_review |
-| horus_get_review | planRef、configRef、environment | 对应版本/配置的审核状态、有效 reviewRef 或阻塞原因 |
 | horus_record_review_decision | reviewBundleRef、planRef、scopeHash、决定、来源、用户确认引用/必要摘录 | 已记录的人工决定、reviewRef 与 local_recorded 来源；不能代表 Agent 自行批准 |
 | horus_start_run | planRef、reviewRef、environment、requestId | 审核通过时 runId/状态，重复请求返回同一运行；否则阻塞/冲突原因 |
-| horus_get_run | runId、afterEvent、limit | 状态、计数、增量事件；结束时含报告引用 |
-| horus_wait_run | runId、afterEvent、waitMs<=30000 | 完成/状态变化或有界超时；完成时含摘要和报告引用 |
+| horus_get_run | runId | 持久状态；结束时含报告引用 |
+| horus_wait_run | runId、waitMs<=30000 | 完成或有界超时；完成时含摘要和报告引用 |
 | horus_get_artifact | artifactRef、offset、limit | 计划审核材料或运行证据的脱敏内容/片段 |
 | horus_cancel_run | runId | 取消请求状态 |
-| horus_cleanup_run | runId、environment | 清理任务与账本引用 |
+| horus_attach_resource_metrics | runId、metrics | 附加已审核的可选 SSH 资源观测，保留 HTTP 判定 |
 
 除能力查询、项目列表和 open_project 外，业务工具均显式带 projectRef，表内省略重复字段。项目不由宿主当前目录隐式推断；读文件仅限工作区或启动时用 --read-root 注册的只读根目录，资料/artifact 引用验证项目归属。工具不接受明文凭据或任意本机路径。默认列表 20 条，上限 100，大内容分页。save_plan 不接受审核字段；人工决定只能对已展示、待审核且版本/范围匹配的材料独立记录。对话确认引用是审计记录，不宣称是平台独立验证的身份凭据。
 
 正常测试失败和等待审核作为业务结果，不能使用 isError 冒充工具损坏；参数、非法操作、对象读取错误才是工具错误。简短 content 加 structuredContent，读写提示正确标注，范围和审核由核心执行。
 
-共用返回字段 schemaVersion/projectRef/status/summary/refs/issues/nextActions，无项目的查询使用 projectRef=null，工具 payload 单独类型化。问题含机器 code、字段位置、原因、修复建议及是否需用户补充；nextActions 是建议，不授予批准。测试失败不触发盲目重试。审核/报告 artifact 可经 MCP 读取，不能只返回客户端打不开的服务端路径。
+共用返回字段 schemaVersion/projectRef/status/summary/refs/issues/nextActions/payload，无项目的查询使用 projectRef=null。问题含机器 code、字段位置、原因、修复建议及是否需用户补充；nextActions 是建议，不授予批准。测试失败不触发盲目重试。审核/报告 artifact 可经 MCP 读取，不能只返回客户端打不开的服务端路径。
 
 只依赖普通 tools/list、tools/call，不要求 sampling、专属 UI 或客户端长任务扩展。通过两客户端实测确认基本协议兼容性，不能用标准标签替代验收。
 
@@ -509,7 +506,7 @@ Skill 在当前会话可用时调用 wait_run，以每次最多 30s 的有界等
 
 业务 CI 使用 Python 3.12 与 uv 安装固定版本基础 wheel、恢复 Hurl/k6 二进制缓存、导入已审核包、注入测试凭据、执行该版本、始终上传脱敏产物并使用退出码。目标为已部署测试环境，内网用自托管 Runner；不要求安装 FastMCP extras、启动 MCP/LLM、克隆业务源码或启动后端/数据库。Python 依赖用带哈希的发布约束锁定；缓存键包含系统、架构、Python 3.12 和锁定版本。
 
-plan export --with-review 包含计划、所需 OperationCatalog/Schema 快照、依据摘要、审核记录和完整性 manifest，不包含凭据或完整源码仓库。CI 从受信来源取得包，import 验证哈希及引用闭包，再绑定当前环境配置。配置或审核不匹配立即阻塞，不从聊天重建步骤，也不要求 CI 重新分析代码。撤销通过受信版本库/产物更新传播，首版离线 CI 不承诺在线即时撤销。
+plan export 包含计划、所需 OperationCatalog/Schema 快照、依据摘要、审核记录和完整性 manifest，不包含凭据或完整源码仓库。CI 从受信来源取得包，import 验证哈希及引用闭包，保留已审核目标和配置。配置或审核不匹配立即阻塞，不从聊天重建步骤，也不要求 CI 重新分析代码。撤销通过受信版本库/产物更新传播，首版离线 CI 不承诺在线即时撤销。
 
 平台自己的集成 CI 启动永久 fixture 验证平台，不改变业务 CI 接入要求。产物为 summary.json、report.json、report.md、junit.xml 和 evidence/；首条交付不强制 HTML/报告服务。Skill 不参与无模型的 CI 回放。
 
@@ -589,7 +586,7 @@ Agent 验收使用干净项目，仅提供被测资料/源码/策略，不向 Ag
 | --- | --- | --- |
 | T1 工程和契约 | Python 3.12/uv/wheel、严格模型；业务理解/覆盖/身份/分支/轮询/审核契约及引用错误定位 | 无 |
 | T2 永久 fixtures | reference-api 与 workflow-api 的资料/源码/HTTP、正常及数据/权限/状态/等待/延迟故障 | T1 |
-| T3 自动接入和知识 | 三种文档规范快照、操作目录、受限检索、身份/范围草案、业务理解依据、集中缺口和稳定引用 | T1 |
+| T3 接口导入和上下文 | OpenAPI/Swagger URL 与 UI 解析、三种规范目录、可选宿主源码/聊天依据、范围草案和集中缺口 | T1 |
 | T4 Hurl 适配器 | 编译/机器结果/脱敏/source map，真实响应与资源 ID 可取 | T1–T3 |
 | T5 功能执行核心 | ReviewGate、身份隔离、分支/轮询/预算、变量/依赖/finally/账本；未批准零正式请求，失败能清理 | T4 |
 | T6 k6 适配器 | 基础负载/官方结果/阈值/采样，数据错和延迟检出 | T2、T3、T5 |

@@ -8,13 +8,19 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field, ValidationError
 
 from horus import __version__
-from horus.core.models import Model, Plan, ProjectConfig
+from horus.adapters.process import check_engine
+from horus.core.models import Model, Plan, ProjectConfig, ResourceMetrics
+from horus.core.runs import Runs
 from horus.core.service import Service
 from horus.core.store import HorusError
 
 INSTRUCTIONS = """horus tests HTTP APIs with human-reviewed, immutable plans.
-Call horus_get_capabilities, open a project, stage config, register/read documentation
-and code, then generate and save your own business-aware plan using horus_get_plan_schema.
+Call horus_get_capabilities, open a project, stage config, import an OpenAPI/Swagger URL,
+then generate and save your own business-aware plan using horus_get_plan_schema.
+Use ${vars.name}, ${secrets.binding}, ${run.id}; double-brace templates are unsupported.
+Read optional project code using your host's existing tools. Put relevant source findings
+or user chat material in plan.supportingContext; cite these as context:<id>. No repository
+cloning or special source channel is required from horus.
 Prepare and read the review artifact. Show its exact version, target, writes, cleanup,
 load budget and unknowns to the user. Only record an explicit human decision on THAT
 version. A general test request is not approval. Never submit credential values.
@@ -46,6 +52,7 @@ class Result(Model):
 
 def create_server(workspace: Path, read_roots: list[Path] | None = None) -> FastMCP:
     service = Service(workspace, read_roots=read_roots)
+    runs = Runs(service)
     server = FastMCP("horus", instructions=INSTRUCTIONS, version=__version__)
 
     async def invoke(project_ref: str | None, action: Callable[[], dict[str, Any]]) -> Result:
@@ -53,31 +60,62 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
             payload = await asyncio.to_thread(action)
         except HorusError as exc:
             if exc.code.startswith("review_") or exc.code == "missing_target":
-                return Result(projectRef=project_ref, status="blocked", summary=str(exc),
-                              issues=[Issue(code=exc.code, location="", reason=str(exc),
-                                            nextAction="Resolve the review or input issue",
-                                            needsUserInput=True)])
+                return Result(
+                    projectRef=project_ref,
+                    status="blocked",
+                    summary=str(exc),
+                    issues=[
+                        Issue(
+                            code=exc.code,
+                            location="",
+                            reason=str(exc),
+                            nextAction="Resolve the review or input issue",
+                            needsUserInput=True,
+                        )
+                    ],
+                )
             raise ToolError(str(exc)) from exc
         except ValidationError as exc:
             raise ToolError(str(exc.errors(include_input=False, include_url=False))) from exc
         except (OSError, ValueError) as exc:
             raise ToolError(f"input_error: {type(exc).__name__}") from exc
         refs = {k: v for k, v in payload.items() if k.endswith("Ref") and isinstance(v, str)}
-        return Result(projectRef=payload.get("projectRef", project_ref),
-                      status=payload.get("status", "ready"), summary=payload.get("summary", "OK"),
-                      refs=refs, payload=payload)
+        return Result(
+            projectRef=payload.get("projectRef", project_ref),
+            status=payload.get("status", "ready"),
+            summary=payload.get("summary", "OK"),
+            refs=refs,
+            payload=payload,
+        )
 
     @server.tool()
     async def horus_get_capabilities() -> Result:
         """Check readiness, supported capabilities and workflow before opening a project."""
-        return Result(status="ready", summary="Plan and review capabilities are available",
-                      payload={"version": __version__, "python": "3.12",
-                               "sources": ["local-openapi", "local-markdown", "local-code"],
-                               "steps": ["http", "load"], "executionReady": False,
-                               "gaps": ["execution adapters and Worker are under implementation",
-                                        "Git/URL, identity, branch and poll support are pending"],
-                               "readRoots": [str(p) for p in service.read_roots]},
-                      nextActions=["horus_open_project", "horus_get_plan_schema"])
+        engines = {}
+        for name in ["hurl", "k6"]:
+            try:
+                engines[name] = {"status": "ready", "version": await check_engine(name)}
+            except HorusError as exc:
+                engines[name] = {"status": "unavailable", "reason": exc.code}
+        return Result(
+            status="ready",
+            summary="Plan, review, execution and reports are available",
+            payload={
+                "version": __version__,
+                "python": "3.12",
+                "sources": ["openapi-url", "swagger-ui-url", "local-openapi"],
+                "steps": ["http", "load"],
+                "engines": engines,
+                "executionReady": all(e["status"] == "ready" for e in engines.values()),
+                "gaps": [
+                    "identity, branch and poll support are pending",
+                    "repair cleanup is pending",
+                    "regular-expression assertions are pending",
+                ],
+                "readRoots": [str(p) for p in service.read_roots],
+            },
+            nextActions=["horus_open_project", "horus_get_plan_schema"],
+        )
 
     @server.tool(annotations={"readOnlyHint": True})
     async def horus_get_plan_schema() -> Result:
@@ -90,65 +128,92 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
         if offset < 0 or not 1 <= limit <= 100:
             raise ToolError("invalid_page")
         projects = service.list_projects()
-        return Result(status="ready", summary="Projects", payload={
-            "projects": projects[offset:offset + limit],
-            "nextOffset": offset + limit if offset + limit < len(projects) else None})
+        return Result(
+            status="ready",
+            summary="Projects",
+            payload={
+                "projects": projects[offset : offset + limit],
+                "nextOffset": offset + limit if offset + limit < len(projects) else None,
+            },
+        )
 
     @server.tool()
     async def horus_open_project(name: str, createIfMissing: bool = False) -> Result:
         """Create or restore a project by name or projectRef, including saved asset references."""
-        return await invoke(None, lambda: service.open_project(
-            name, create_if_missing=createIfMissing))
+        return await invoke(
+            None, lambda: service.open_project(name, create_if_missing=createIfMissing)
+        )
 
     @server.tool()
     async def horus_stage_project_config(projectRef: str, config: ProjectConfig) -> Result:
         """Save an immutable configuration draft. This does not authorize probes or execution."""
-        return await invoke(projectRef, lambda: service.stage_config(
-            projectRef, config.model_dump(mode="json")))
+        return await invoke(
+            projectRef, lambda: service.stage_config(projectRef, config.model_dump(mode="json"))
+        )
+
+    @server.tool()
+    async def horus_import_api(projectRef: str, url: str) -> Result:
+        """Import an OpenAPI/Swagger definition or common Swagger UI URL into the project."""
+        return await invoke(projectRef, lambda: service.import_api(projectRef, url))
 
     @server.tool()
     async def horus_register_source(projectRef: str, kind: str, uri: str) -> Result:
-        """Register a local openapi/markdown/code file within a server read root."""
+        """Register an openapi URL or a local openapi/markdown file within a server read root."""
         return await invoke(projectRef, lambda: service.register_source(projectRef, kind, uri))
 
     @server.tool(annotations={"readOnlyHint": True})
-    async def horus_get_context(projectRef: str, sourceRef: str, offset: int = 0,
-                                limit: int = 100) -> Result:
+    async def horus_get_context(
+        projectRef: str, sourceRef: str, offset: int = 0, limit: int = 100
+    ) -> Result:
         """Read numbered documentation/code and operation catalog. Evidence uses sourceRef#Lx."""
-        return await invoke(projectRef, lambda: service.get_context(
-            projectRef, sourceRef, offset, limit))
+        return await invoke(
+            projectRef, lambda: service.get_context(projectRef, sourceRef, offset, limit)
+        )
 
     @server.tool()
     async def horus_save_plan(projectRef: str, plan: Plan) -> Result:
         """Save and validate your generated plan. Saving never approves it."""
-        return await invoke(projectRef, lambda: service.save_plan(
-            projectRef, plan.model_dump(mode="json")))
+        return await invoke(
+            projectRef, lambda: service.save_plan(projectRef, plan.model_dump(mode="json"))
+        )
 
     @server.tool(annotations={"readOnlyHint": True})
-    async def horus_validate_plan(projectRef: str, planRef: str, configRef: str | None = None,
-                                 environment: str = "test") -> Result:
+    async def horus_validate_plan(
+        projectRef: str, planRef: str, configRef: str | None = None, environment: str = "test"
+    ) -> Result:
         """Check sources, coverage, variables, scope and worst-case request budget."""
-        return await invoke(projectRef, lambda: service.validate_plan(
-            projectRef, planRef, configRef, environment))
+        return await invoke(
+            projectRef, lambda: service.validate_plan(projectRef, planRef, configRef, environment)
+        )
 
     @server.tool()
-    async def horus_prepare_review(projectRef: str, planRef: str, configRef: str,
-                                  environment: str = "test") -> Result:
+    async def horus_prepare_review(
+        projectRef: str, planRef: str, configRef: str, environment: str = "test"
+    ) -> Result:
         """Render a fixed review bundle; read and show it before requesting human confirmation."""
-        return await invoke(projectRef, lambda: service.prepare_review(
-            projectRef, planRef, configRef, environment))
+        return await invoke(
+            projectRef, lambda: service.prepare_review(projectRef, planRef, configRef, environment)
+        )
 
     @server.tool()
-    async def horus_get_artifact(projectRef: str, artifactRef: str, offset: int = 0,
-                                limit: int = 200) -> Result:
+    async def horus_get_artifact(
+        projectRef: str, artifactRef: str, offset: int = 0, limit: int = 200
+    ) -> Result:
         """Read bounded review/report content. Reading review material records retrieval only."""
-        return await invoke(projectRef, lambda: service.get_artifact(
-            projectRef, artifactRef, offset, limit))
+        return await invoke(
+            projectRef, lambda: service.get_artifact(projectRef, artifactRef, offset, limit)
+        )
 
     @server.tool()
-    async def horus_record_review_decision(projectRef: str, reviewBundleRef: str,
-                                            planRef: str, scopeHash: str, decision: str,
-                                            source: str, confirmation: str) -> Result:
+    async def horus_record_review_decision(
+        projectRef: str,
+        reviewBundleRef: str,
+        planRef: str,
+        scopeHash: str,
+        decision: str,
+        source: str,
+        confirmation: str,
+    ) -> Result:
         """Record an actual human decision after displaying this version; never invent approval.
 
         source is conversation or CLI. confirmation is the real message reference or excerpt.
@@ -156,7 +221,58 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
         """
         if source not in {"conversation", "CLI"}:
             raise ToolError("invalid_decision_source")
-        return await invoke(projectRef, lambda: service.record_decision(
-            projectRef, reviewBundleRef, planRef, scopeHash, decision, source, confirmation))
+        return await invoke(
+            projectRef,
+            lambda: service.record_decision(
+                projectRef, reviewBundleRef, planRef, scopeHash, decision, source, confirmation
+            ),
+        )
+
+    @server.tool()
+    async def horus_start_run(
+        projectRef: str,
+        planRef: str,
+        reviewRef: str | None,
+        requestId: str,
+        environment: str = "test",
+    ) -> Result:
+        """Start once after review. Retry a lost response with the SAME requestId and parameters."""
+        return await invoke(
+            projectRef, lambda: runs.start(projectRef, planRef, reviewRef, environment, requestId)
+        )
+
+    @server.tool(annotations={"readOnlyHint": True})
+    async def horus_get_run(projectRef: str, runId: str) -> Result:
+        """Read persisted run state and final report reference, including after reconnecting."""
+        return await invoke(projectRef, lambda: runs.get(projectRef, runId))
+
+    @server.tool(annotations={"readOnlyHint": True})
+    async def horus_wait_run(projectRef: str, runId: str, waitMs: int = 30000) -> Result:
+        """Wait at most 30s. Wait timeout/cancellation does not stop the independent Worker."""
+        if not 0 <= waitMs <= 30000:
+            raise ToolError("invalid_wait")
+        payload = await runs.wait(projectRef, runId, waitMs)
+        return Result(
+            projectRef=projectRef,
+            status=payload["status"],
+            summary=payload.get("verdict", payload["status"]),
+            payload=payload,
+            refs={"artifactRef": payload["artifactRef"]} if "artifactRef" in payload else {},
+        )
+
+    @server.tool()
+    async def horus_attach_resource_metrics(
+        projectRef: str, runId: str, metrics: ResourceMetrics
+    ) -> Result:
+        """Attach opted-in SSH observations to a finished report; HTTP verdict stays unchanged.
+
+        Collect only within plan.resourceMonitoring. Never invent samples or upload credentials.
+        """
+        return await invoke(projectRef, lambda: runs.attach_metrics(projectRef, runId, metrics))
+
+    @server.tool()
+    async def horus_cancel_run(projectRef: str, runId: str) -> Result:
+        """Request cancellation, followed by bounded cleanup and an automatic report."""
+        return await invoke(projectRef, lambda: runs.cancel(projectRef, runId))
 
     return server

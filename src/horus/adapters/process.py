@@ -2,12 +2,15 @@ import asyncio
 import os
 import shutil
 import signal
+import sys
+from contextvars import ContextVar
 from pathlib import Path
 
 from horus.core.store import HorusError
 
 VERSIONS = {"hurl": "8.0.1", "k6": "2.3.0"}
 MAX_OUTPUT = 2 * 1024 * 1024
+EXECUTION_LEASE: ContextVar[int | None] = ContextVar("execution_lease", default=None)
 
 
 def engine_path(name: str) -> str:
@@ -22,15 +25,29 @@ def engine_path(name: str) -> str:
 async def run_engine(
     name: str, args: list[str], *, timeout: float, env: dict[str, str] | None = None
 ) -> tuple[int, bytes, bytes]:
-    process = await asyncio.create_subprocess_exec(
-        engine_path(name),
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env={"PATH": os.defpath, **(env or {})},
-        start_new_session=True,
-        umask=0o077,
-    )
+    lifetime_read, lifetime_write = os.pipe()
+    lease = EXECUTION_LEASE.get()
+    try:
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "horus.adapters.guardian",
+            str(lifetime_read),
+            engine_path(name),
+            *args,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env={"PATH": os.defpath, **(env or {})},
+            pass_fds=(lifetime_read,) if lease is None else (lifetime_read, lease),
+            start_new_session=True,
+            umask=0o077,
+        )
+    except BaseException:
+        os.close(lifetime_write)
+        raise
+    finally:
+        os.close(lifetime_read)
 
     async def drain(reader: asyncio.StreamReader | None) -> bytes:
         assert reader is not None
@@ -44,14 +61,23 @@ async def run_engine(
     try:
         await asyncio.wait_for(process.wait(), timeout=timeout)
     except BaseException:
+        os.close(lifetime_write)
+        lifetime_write = -1
         if process.returncode is None:
             try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            await process.wait()
+                await asyncio.wait_for(process.wait(), timeout=2)
+            except TimeoutError:
+                # SIGTERM asks the guardian to reap its engine before releasing the lease.
+                try:
+                    os.kill(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                await asyncio.wait_for(process.wait(), timeout=2)
         await asyncio.gather(stdout, stderr)
         raise
+    finally:
+        if lifetime_write >= 0:
+            os.close(lifetime_write)
     output, errors = await asyncio.gather(stdout, stderr)
     if len(output) > MAX_OUTPUT or len(errors) > MAX_OUTPUT:
         raise HorusError("engine_output_truncated", name)

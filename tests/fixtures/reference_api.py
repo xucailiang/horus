@@ -7,6 +7,7 @@ import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 
@@ -42,6 +43,14 @@ class Handler(BaseHTTPRequestHandler):
         route = self.path.split("?", 1)[0]
         with self.server.lock:
             self.server.requests.append((self.command, route))
+        if route == "/openapi.yaml" and self.command == "GET":
+            body = (Path(__file__).parent / "reference-api" / "openapi.yaml").read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/yaml")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if route == "/healthz" and self.command == "GET":
             self.respond(200, {"status": "ok"})
             return

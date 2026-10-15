@@ -1,6 +1,6 @@
 # horus：Agent + MCP 主使用链路
 
-版本 v0.1，2026-10-15。状态：待实施与验收；本页中的 horus 工具、启动参数和配置示例是交付目标，目前程序尚未实现。
+2026-10-15。MCP、Skill 和首条执行链路已实现，M1 仍在验收；具体证据见 IMPLEMENTATION.md。
 
 ## 1. 产品入口
 
@@ -15,7 +15,7 @@
 3. 提供凭据的运行环境或既有受控凭据来源。工具只收绑定名称，避免把密码放入聊天或 MCP 参数。首次设置属于环境接入，后续通过 MCP 检查是否就绪；环境变量在进程启动时继承，变更后可能需要重连。
 4. 分别安装 horus Skill 到宿主支持的位置，并检查是否能发现。宿主工具授权与 horus 计划审核是两层机制；不自动修改用户的客户端安全设置，也不声称 horus 的批准能绕过宿主授权。
 
-Codex 的 MCP 使用 config.toml，Claude Code 可用 .mcp.json；其真实配置说明见文末官方来源。以下为实施后的源码模式示例，绝对路径需要替换，运行前须先完成 uv sync。正式发布再提供锁定 wheel 对应的安装方式；不能让未发布的同名包被误装。
+Codex 的 MCP 使用 config.toml，Claude Code 可用 .mcp.json；其真实配置说明见文末官方来源。以下为当前源码模式示例，绝对路径需要替换，运行前须先完成 uv sync。正式发布再提供锁定 wheel 对应的安装方式；不能让未发布的同名包被误装。
 
 Codex：
 
@@ -44,7 +44,7 @@ Claude Code：
 
 两者都需要确保所需凭据在服务端实际可见；Claude Code 的启动环境、变量传递和组织策略按其官方配置处理，示例不内嵌密码。uv 使用绝对路径，避免 GUI/终端 PATH 不同；平台目录与持久工作区显式指定，避免依赖宿主当前目录。
 
-如需读取工作区以外的本地文档/checkout，首次配置服务端 --read-root <absolute-path>；测试验收可预先注册 fixture 所在只读根目录。后续项目接入只使用这些根或文档/Git URL，不由 Agent 任意增加本机访问范围。
+如需读取工作区以外的本地文档/checkout，首次配置服务端 --read-root <absolute-path>；测试验收可预先注册 fixture 所在只读根目录。后续接口接入使用 OpenAPI/Swagger URL；可选源码由宿主已有权限读取。
 
 Skill 的共享正文来自随包分发的 skills/horus。Codex 可安装到 ~/.agents/skills/horus，Claude Code 可安装到 ~/.claude/skills/horus；安装与发现需分别验收。首版不要求专属插件、MCP sampling、elicitation 或自定义审批 UI。
 
@@ -55,12 +55,12 @@ Skill 的共享正文来自随包分发的 skills/horus。Codex 可安装到 ~/.
 | 连接检查 | Agent 查看 horus 能力和环境问题 | get_capabilities 返回版本、引擎状态、资料能力、范围上限和下一步 |
 | 创建或恢复项目 | 从自然语言目标选择已有项目或新建 | list_projects / open_project 返回 projectRef 与上下文摘要，不要求 CLI 初始化 |
 | 提交接入草案 | Agent 整理目标地址、环境、凭据绑定和边界 | stage_project_config 保存不可变 configRef，列缺口；草案不自动扩大权限 |
-| 理解接口与源码 | 读取文档、源码与已有知识，必要时只读探测 | register_source / get_context / search_source / save_knowledge / probe_operation |
+| 理解接口与源码 | 导入 OpenAPI/Swagger 链接；按需使用宿主源码能力或聊天资料 | import_api / get_context；可选源码由宿主阅读，聊天/源码依据随 Plan.supportingContext 保存 |
 | 生成并校验计划 | LLM 产出业务理解、覆盖、链路、数据、断言和清理 | save_plan / validate_plan，问题带字段位置和修复建议 |
 | 展示审核材料 | Agent 展示当前具体版本及范围、风险与未知项 | prepare_review 返回 reviewBundleRef、planRef、configRef、scopeHash 和可读取材料 |
-| 用户确认 | 用户确认展示的版本，或提出修改 | record_review_decision 记录明确决定和来源；修改后重新展示，不能沿用旧批准 |
+| 用户确认 | 用户对展示版本回复“我确定”，或提出修改 | record_review_decision 记录明确决定和来源；修改后重新展示，不能沿用旧批准 |
 | 执行 | Agent 一次提交 planRef、reviewRef、环境及 requestId | start_run 返回 runId；由 reviewRef 固定配置，独立 Worker 执行，不逐 HTTP 请求往返 Agent |
-| 等待 | Agent 自动有界等待并按需显示进展 | wait_run / get_run 返回游标、状态、摘要；断开重连后可恢复查询 |
+| 等待 | Agent 自动有界等待并按需显示进展 | wait_run / get_run 返回状态、摘要；断开重连后可恢复查询 |
 | 报告 | 核心自动生成，Agent 读取并解释 | 终态返回报告摘要和 artifactRef，get_artifact 分页读取完整证据/报告 |
 
 工具在协议中使用 horus_ 前缀。业务工具显式携带 projectRef，引用跨项目校验；同一个 MCP 服务处理不同项目时不依赖可被别的会话覆盖的全局“当前项目”。

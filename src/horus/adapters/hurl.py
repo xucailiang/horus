@@ -24,6 +24,8 @@ def pointer(value: Any, path: str) -> Any:
     try:
         for part in path[1:].split("/"):
             key = part.replace("~1", "/").replace("~0", "~")
+            if isinstance(value, list) and not re.fullmatch(r"0|[1-9][0-9]*", key):
+                return MISSING
             value = value[int(key)] if isinstance(value, list) else value[key]
         return value
     except (ValueError, IndexError, KeyError, TypeError):
@@ -93,15 +95,31 @@ class Response:
         return results
 
 
+def equal(actual: Any, expected: Any) -> bool:
+    if type(actual) in (int, float) and type(expected) in (int, float):
+        return bool(actual == expected)
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(actual, dict):
+        return actual.keys() == expected.keys() and all(
+            equal(value, expected[key]) for key, value in actual.items()
+        )
+    if isinstance(actual, list):
+        return len(actual) == len(expected) and all(
+            equal(a, b) for a, b in zip(actual, expected, strict=True)
+        )
+    return bool(actual == expected)
+
+
 def compare(actual: Any, operator: str, expected: Any) -> bool:
     if operator == "exists":
         return (actual is not MISSING) == (expected if isinstance(expected, bool) else True)
     if actual is MISSING:
         return False
     if operator == "eq":
-        return type(actual) is type(expected) and bool(actual == expected)
+        return equal(actual, expected)
     if operator == "ne":
-        return type(actual) is not type(expected) or bool(actual != expected)
+        return not equal(actual, expected)
     if operator == "type":
         types = {
             "string": str,
@@ -114,6 +132,8 @@ def compare(actual: Any, operator: str, expected: Any) -> bool:
         }
         if expected == "number":
             return type(actual) in (int, float)
+        if expected == "integer":
+            return type(actual) in (int, float) and actual % 1 == 0
         return type(actual) is types.get(expected)
     if operator == "length":
         return isinstance(actual, (str, list, dict)) and len(actual) == expected
@@ -124,6 +144,16 @@ def compare(actual: Any, operator: str, expected: Any) -> bool:
     raise HorusError("unsupported_assertion", operator)
 
 
+def validate_headers(headers: dict[str, str]) -> None:
+    for name, value in headers.items():
+        if (
+            not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name)
+            or name.lower() in {"host", "content-length", "proxy-authorization"}
+            or any(c in value for c in ["\r", "\n", "{{", "}}", "\x00"])
+        ):
+            raise HorusError("invalid_header", name)
+
+
 class HurlAdapter:
     async def request(
         self, operation: dict[str, Any], base_url: str, request: Request, *, timeout: float = 15
@@ -132,13 +162,7 @@ class HurlAdapter:
         headers = dict(request.headers)
         if request.body is not None:
             headers.setdefault("Content-Type", "application/json")
-        for name, value in headers.items():
-            if (
-                not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name)
-                or name.lower() in {"host", "content-length", "proxy-authorization"}
-                or any(c in value for c in ["\r", "\n", "{{", "}}", "\x00"])
-            ):
-                raise HorusError("invalid_header", name)
+        validate_headers(headers)
         with tempfile.TemporaryDirectory(prefix="horus-private-") as temporary:
             root = Path(temporary).resolve()
             path = root / "request.hurl"

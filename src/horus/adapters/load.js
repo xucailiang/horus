@@ -20,7 +20,8 @@ function pointer(value, path) {
   if (path === '') return value;
   for (const part of path.slice(1).split('/')) {
     const key = part.replace(/~1/g, '/').replace(/~0/g, '~');
-    if (value === null || typeof value !== 'object' || !(key in value)) return undefined;
+    if (value === null || typeof value !== 'object'
+      || !Object.prototype.hasOwnProperty.call(value, key)) return undefined;
     value = value[key];
   }
   return value;
@@ -63,8 +64,8 @@ export default function () {
       headers: input.headers, redirects: 0, timeout: '15s', tags: {horus_vu: String(__VU)},
       responseCallback: http.expectedStatuses(...allowed),
     });
-  const statusFailed = !statusAssertions.every(a => Array.isArray(a.status)
-    ? a.status.includes(response.status) : response.status === a.status);
+  const statusFailed = !allowed.includes(response.status) || !statusAssertions.every(a =>
+    Array.isArray(a.status) ? a.status.includes(response.status) : response.status === a.status);
   httpFailure.add(response.status === 0 || statusFailed);
   let body;
   try { body = response.json(); } catch (_) { body = response.body; }

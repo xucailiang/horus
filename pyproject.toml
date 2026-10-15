@@ -7,7 +7,17 @@ name = "horus"
 version = "0.1.0a1"
 description = "Agent-planned, human-reviewed, deterministic API testing"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.13"
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Natural Language :: English",
+  "Natural Language :: Chinese (Simplified)",
+]
 dependencies = [
   "pydantic==2.14.1",
   "typer==0.27.3",
@@ -19,6 +29,11 @@ dependencies = [
 
 [project.optional-dependencies]
 mcp = ["fastmcp-slim[server]==4.1.0"]
+
+[project.urls]
+Homepage = "https://github.com/xucailiang/horus"
+Repository = "https://github.com/xucailiang/horus"
+Issues = "https://github.com/xucailiang/horus/issues"
 
 [dependency-groups]
 dev = [

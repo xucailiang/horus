@@ -1,4 +1,5 @@
 import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
@@ -60,6 +61,41 @@ async def test_real_k6_metrics_and_thresholds(mode, verdict):
         assert result["metrics"]["latencyP99Ms"] > 0
         assert result["metrics"]["dataCheckFailureRate"] == (1 if mode == "data-error" else 0)
         assert len(result["failureSamples"]) <= 10
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+async def test_http_500_fails_default_http_threshold_without_status_assertion():
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            body = b'{"message":"available"}'
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    step = LoadStep.model_validate({
+        "kind": "load", "id": "read", "operationId": "read", "request": {},
+        "assertions": [{"id": "body", "jsonPointer": "/message", "expected": "available",
+                        "evidenceRefs": ["contract"]}],
+        "loadProfile": {"vus": 1, "iterations": 3, "maxDurationMs": 5000},
+        "thresholds": {"httpErrorRate": {"lte": 0}, "dataCheckFailureRate": {"lte": 0}},
+    })
+    try:
+        result = await K6Adapter().run(
+            {"method": "GET", "path": "/"}, f"http://127.0.0.1:{server.server_port}", step
+        )
+        assert result["status"] == "failed"
+        assert result["metrics"]["httpErrorRate"] == 1
+        assert result["metrics"]["dataCheckFailureRate"] == 0
+        assert len(result["failureSamples"]) == 3
     finally:
         server.shutdown()
         server.server_close()

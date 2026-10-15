@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 import yaml
 from openapi_spec_validator import validate
 
+from horus.adapters.openapi import load_api
 from horus.core.models import HttpStep, LoadStep, Plan, ProjectConfig
 from horus.core.store import AssetStore, HorusError, atomic_write, canonical, digest, file_lock
 
@@ -31,8 +32,10 @@ class Service:
         return AssetStore(root / ".horus")
 
     def list_projects(self) -> list[dict[str, Any]]:
-        return [json.loads(p.read_bytes()) for p in
-                sorted((self.workspace / "projects").glob("*/project.json"))]
+        return [
+            json.loads(p.read_bytes())
+            for p in sorted((self.workspace / "projects").glob("*/project.json"))
+        ]
 
     def open_project(self, name: str, *, create_if_missing: bool = False) -> dict[str, Any]:
         with file_lock(self.workspace / ".projects.lock"):
@@ -43,13 +46,19 @@ class Service:
                 result = matches[0]
             elif create_if_missing and 0 < len(name.strip()) <= 100:
                 result = {"projectRef": "project_" + uuid.uuid4().hex, "name": name}
-                atomic_write(self.workspace / "projects" / result["projectRef"] /
-                             "project.json", result)
+                atomic_write(
+                    self.workspace / "projects" / result["projectRef"] / "project.json", result
+                )
             else:
                 raise HorusError("project_not_found", name)
         store = self.project(result["projectRef"])
-        result["refs"] = {kind: [p.stem for p in sorted((store.root / kind).glob("*.json"))]
-                          for kind in ["sources", "configs", "plans", "bundles", "reviews"]}
+        result["refs"] = {
+            kind: [p.stem for p in sorted((store.root / kind).glob("*.json"))]
+            for kind in ["sources", "configs", "plans", "bundles", "reviews"]
+        }
+        result["refs"]["runs"] = [
+            path.parent.name for path in sorted((store.root / "runs").glob("*/intent.json"))
+        ][-20:]
         return result
 
     def stage_config(self, project_ref: str, raw: dict[str, Any]) -> dict[str, Any]:
@@ -59,9 +68,16 @@ class Service:
             if not target:
                 raise HorusError("missing_target", env.baseUrlFromEnv or "baseUrl")
             parsed = urlsplit(target)
-            if (parsed.scheme not in {"http", "https"} or not parsed.hostname or
-                    parsed.username or parsed.password or parsed.query or parsed.fragment or
-                    any(c.isspace() for c in target) or "\\" in target):
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+                or parsed.query
+                or parsed.fragment
+                or any(c.isspace() for c in target)
+                or "\\" in target
+            ):
                 raise HorusError("invalid_target", "Use an HTTP origin and optional base path")
             env.baseUrl = target.rstrip("/")
             env.baseUrlFromEnv = None
@@ -73,7 +89,9 @@ class Service:
         return {"configRef": ref, "status": "draft", "config": value}
 
     def register_source(self, project_ref: str, kind: str, uri: str) -> dict[str, Any]:
-        if kind not in {"openapi", "markdown", "code"}:
+        if kind == "openapi" and urlsplit(uri).scheme in {"http", "https"}:
+            return self.import_api(project_ref, uri)
+        if kind not in {"openapi", "markdown"}:
             raise HorusError("unsupported_source", kind)
         path = Path(uri).expanduser()
         if not path.is_absolute():
@@ -86,6 +104,14 @@ class Service:
         if not path.is_file() or path.stat().st_size > 2 * 1024 * 1024:
             raise HorusError("source_unavailable", "Expected a UTF-8 file up to 2 MiB")
         text = path.read_text(encoding="utf-8")
+        return self._save_source(project_ref, kind, path.name, text)
+
+    def import_api(self, project_ref: str, url: str) -> dict[str, Any]:
+        self.project(project_ref)
+        text, resolved = load_api(url)
+        return self._save_source(project_ref, "openapi", urlsplit(resolved).path, text)
+
+    def _save_source(self, project_ref: str, kind: str, name: str, text: str) -> dict[str, Any]:
         catalog: dict[str, Any] = {}
         if kind == "openapi":
             spec = yaml.safe_load(text)
@@ -95,20 +121,33 @@ class Service:
             validate(spec)
             for route, item in spec.get("paths", {}).items():
                 for method, operation in item.items():
-                    if method.lower() not in {"get", "post", "put", "patch", "delete",
-                                              "head", "options"}:
+                    if method.lower() not in {
+                        "get",
+                        "post",
+                        "put",
+                        "patch",
+                        "delete",
+                        "head",
+                        "options",
+                    }:
                         continue
                     operation_id = operation.get("operationId", f"{method.upper()}:{route}")
                     if operation_id in catalog:
                         raise HorusError("duplicate_operation", operation_id)
-                    catalog[operation_id] = {"method": method.upper(), "path": route,
-                                             "definition": operation,
-                                             "parameters": item.get("parameters", []) +
-                                             operation.get("parameters", [])}
-        value = {"kind": kind, "name": path.name, "text": text, "catalog": catalog}
+                    catalog[operation_id] = {
+                        "method": method.upper(),
+                        "path": route,
+                        "definition": operation,
+                        "parameters": item.get("parameters", []) + operation.get("parameters", []),
+                    }
+        value = {"kind": kind, "name": name, "text": text, "catalog": catalog}
         ref = self.project(project_ref).put("sources", value)
-        return {"sourceRef": ref, "status": "ready", "operationIds": list(catalog),
-                "evidenceRef": f"{ref}#L1"}
+        return {
+            "sourceRef": ref,
+            "status": "ready",
+            "operationIds": list(catalog),
+            "evidenceRef": f"{ref}#L1",
+        }
 
     def _local_refs_only(self, value: Any) -> None:
         if isinstance(value, dict):
@@ -120,16 +159,23 @@ class Service:
             for child in value:
                 self._local_refs_only(child)
 
-    def get_context(self, project_ref: str, source_ref: str, offset: int = 0,
-                    limit: int = 100) -> dict[str, Any]:
+    def get_context(
+        self, project_ref: str, source_ref: str, offset: int = 0, limit: int = 100
+    ) -> dict[str, Any]:
         source = self.project(project_ref).get("sources", source_ref)
         lines = source["text"].splitlines()
         if offset < 0 or not 1 <= limit <= 200:
             raise HorusError("invalid_page")
-        return {"sourceRef": source_ref, "status": "ready", "catalog": source["catalog"],
-                "lines": [{"line": i + 1, "text": line} for i, line in
-                          enumerate(lines[offset:offset + limit], start=offset)],
-                "nextOffset": offset + limit if offset + limit < len(lines) else None}
+        return {
+            "sourceRef": source_ref,
+            "status": "ready",
+            "catalog": source["catalog"],
+            "lines": [
+                {"line": i + 1, "text": line}
+                for i, line in enumerate(lines[offset : offset + limit], start=offset)
+            ],
+            "nextOffset": offset + limit if offset + limit < len(lines) else None,
+        }
 
     def catalog(self, store: AssetStore, plan: Plan) -> dict[str, Any]:
         result: dict[str, Any] = {}
@@ -141,25 +187,40 @@ class Service:
                 result[key] = operation
         return result
 
-    def validate_plan(self, project_ref: str, plan_ref: str,
-                      config_ref: str | None = None, environment: str = "test") -> dict[str, Any]:
+    def validate_plan(
+        self,
+        project_ref: str,
+        plan_ref: str,
+        config_ref: str | None = None,
+        environment: str = "test",
+    ) -> dict[str, Any]:
         store = self.project(project_ref)
         plan = Plan.model_validate(store.get("plans", plan_ref))
-        config = (ProjectConfig.model_validate(store.get("configs", config_ref))
-                  if config_ref else None)
+        config = (
+            ProjectConfig.model_validate(store.get("configs", config_ref)) if config_ref else None
+        )
         return self._validate(store, plan, config, environment)
 
-    def _validate(self, store: AssetStore, plan: Plan, config: ProjectConfig | None = None,
-                  environment: str = "test") -> dict[str, Any]:
+    def _validate(
+        self,
+        store: AssetStore,
+        plan: Plan,
+        config: ProjectConfig | None = None,
+        environment: str = "test",
+    ) -> dict[str, Any]:
         operations = self.catalog(store, plan)
         sources = {ref: store.get("sources", ref) for ref in plan.sourceRefs}
-        if plan.parentPlanRef:
-            store.get("plans", plan.parentPlanRef)
+        context_ids = {f"context:{item.id}" for item in plan.supportingContext}
+        if len(context_ids) != len(plan.supportingContext):
+            raise HorusError("duplicate_context_id")
         for match in re.finditer(r'"evidenceRefs":\s*(\[[^\]]*\])', plan.model_dump_json()):
             for ref in json.loads(match[1]):
+                if ref in context_ids:
+                    continue
                 source_ref, _, locator = ref.partition("#")
-                if (source_ref not in sources or
-                        not re.fullmatch(r"L[1-9][0-9]*(?:-L?[1-9][0-9]*)?", locator)):
+                if source_ref not in sources or not re.fullmatch(
+                    r"L[1-9][0-9]*(?:-L?[1-9][0-9]*)?", locator
+                ):
                     raise HorusError("invalid_evidence", ref)
                 numbers = [int(n) for n in re.findall(r"\d+", locator)]
                 if max(numbers) > len(sources[source_ref]["text"].splitlines()):
@@ -182,7 +243,17 @@ class Service:
                 step_refs.add(location)
                 if isinstance(step, HttpStep) and step.identityRef:
                     raise HorusError("unsupported_identity", location)
-                for namespace, name in VARIABLE.findall(step.request.model_dump_json()):
+                request_json = step.request.model_dump_json()
+                if re.search(r"\{\{[A-Za-z_][A-Za-z0-9_]*\}\}", request_json):
+                    raise HorusError(
+                        "unsupported_variable_syntax",
+                        f"{location}: use ${{vars.name}} or ${{secrets.binding}}; "
+                        "double braces are unsupported",
+                    )
+                for expression in re.findall(r"(?<!\$)\$\{[^}]+\}", request_json):
+                    if not VARIABLE.fullmatch(expression):
+                        raise HorusError("unsupported_variable_syntax", location)
+                for namespace, name in VARIABLE.findall(request_json):
                     if namespace == "vars" and name not in known:
                         raise HorusError("missing_variable_source", f"{location}: {name}")
                     if namespace == "run" and name != "id":
@@ -217,10 +288,12 @@ class Service:
                     max_requests += step.loadProfile.iterations
                     if config:
                         limits = config.policy.limits
-                        if (step.operationId not in config.policy.loadAllow or
-                                step.loadProfile.vus > limits.maxVus or
-                                step.loadProfile.iterations > limits.maxLoadIterations or
-                                step.loadProfile.maxDurationMs > limits.maxLoadDurationMs):
+                        if (
+                            step.operationId not in config.policy.loadAllow
+                            or step.loadProfile.vus > limits.maxVus
+                            or step.loadProfile.iterations > limits.maxLoadIterations
+                            or step.loadProfile.maxDurationMs > limits.maxLoadDurationMs
+                        ):
                             raise HorusError("load_budget_exceeded", location)
                 prior.add(step.id)
         understanding = plan.businessUnderstanding
@@ -228,29 +301,42 @@ class Service:
             if not set(claim.operationIds).issubset(operations):
                 raise HorusError("unknown_business_operation", claim.id)
         uncovered = {item.itemId for item in plan.coverage.uncovered}
-        self._coverage({f.id for f in understanding.flows},
-                       {f.flowId for f in plan.coverage.flows}, uncovered)
-        self._coverage({r.id for r in understanding.rules},
-                       {r.ruleId for r in plan.coverage.rules}, uncovered)
-        self._coverage({d.id for d in understanding.dataDependencies},
-                       {d.dependencyId for d in plan.coverage.dataDependencies}, uncovered)
+        self._coverage(
+            {f.id for f in understanding.flows}, {f.flowId for f in plan.coverage.flows}, uncovered
+        )
+        self._coverage(
+            {r.id for r in understanding.rules}, {r.ruleId for r in plan.coverage.rules}, uncovered
+        )
+        self._coverage(
+            {d.id for d in understanding.dataDependencies},
+            {d.dependencyId for d in plan.coverage.dataDependencies},
+            uncovered,
+        )
         for flow in plan.coverage.flows:
             if not set(flow.caseIds).issubset(case_ids):
                 raise HorusError("invalid_flow_coverage", flow.flowId)
         for rule in plan.coverage.rules:
             if not set(rule.assertionRefs).issubset(assertion_refs):
-                raise HorusError("invalid_rule_coverage", rule.ruleId)
+                invalid = sorted(set(rule.assertionRefs) - assertion_refs)
+                raise HorusError(
+                    "invalid_rule_coverage",
+                    f"{rule.ruleId}: unknown {invalid}; use caseId.stepId.assertionId",
+                )
         for dep in plan.coverage.dataDependencies:
-            if (dep.captureRef not in capture_refs or
-                    not set(dep.consumerStepRefs).issubset(step_refs)):
+            if dep.captureRef not in capture_refs or not set(dep.consumerStepRefs).issubset(
+                step_refs
+            ):
                 raise HorusError("invalid_dependency_coverage", dep.dependencyId)
         if config:
             if environment not in config.environments:
                 raise HorusError("unknown_environment", environment)
             if max_requests > config.policy.limits.maxRequestsPerRun:
                 raise HorusError("request_budget_exceeded")
-        return {"status": "validated", "maxRequests": max_requests,
-                "operationIds": sorted(operations)}
+        return {
+            "status": "validated",
+            "maxRequests": max_requests,
+            "operationIds": sorted(operations),
+        }
 
     @staticmethod
     def _coverage(expected: set[str], mapped: set[str], uncovered: set[str]) -> None:
@@ -260,34 +346,53 @@ class Service:
     def save_plan(self, project_ref: str, raw: dict[str, Any]) -> dict[str, Any]:
         plan = Plan.model_validate(raw)
         store = self.project(project_ref)
+        if plan.parentPlanRef:
+            store.get("plans", plan.parentPlanRef)
         result = self._validate(store, plan)
         ref = store.put("plans", plan.model_dump(mode="json"))
         return {**result, "planRef": ref}
 
-    def prepare_review(self, project_ref: str, plan_ref: str, config_ref: str,
-                       environment: str) -> dict[str, Any]:
+    def prepare_review(
+        self, project_ref: str, plan_ref: str, config_ref: str, environment: str
+    ) -> dict[str, Any]:
         store = self.project(project_ref)
         validation = self.validate_plan(project_ref, plan_ref, config_ref, environment)
         config = store.get("configs", config_ref)
-        scope = {"projectRef": project_ref, "environment": environment,
-                 "target": config["environments"][environment]["baseUrl"],
-                 "policy": config["policy"]}
-        bundle = {"planRef": plan_ref, "configRef": config_ref, "environment": environment,
-                  "scopeHash": digest(scope), "scope": scope, "validation": validation}
-        plan = store.get("plans", plan_ref)
-        content = (f"# Review {plan['name']}\n\nPlan: {plan_ref}\n\nConfig: {config_ref}\n\n"
-                   f"Target: {scope['target']}\n\nScope: {bundle['scopeHash']}\n\n"
-                   f"{plan['businessUnderstanding']['summary']}\n\n"
-                   "## Scope and budgets\n\n```json\n" + json.dumps(scope, indent=2) +
-                   "\n```\n\n## Complete executable plan\n\n```json\n" +
-                   json.dumps(plan, ensure_ascii=False, indent=2) + "\n```\n")
+        scope = {
+            "projectRef": project_ref,
+            "environment": environment,
+            "target": config["environments"][environment]["baseUrl"],
+            "policy": config["policy"],
+        }
+        bundle = {
+            "planRef": plan_ref,
+            "configRef": config_ref,
+            "environment": environment,
+            "scopeHash": digest(scope),
+            "scope": scope,
+            "validation": validation,
+        }
+        plan = Plan.model_validate(store.get("plans", plan_ref)).model_dump(
+            mode="json", exclude_defaults=True, exclude_none=True
+        )
+        content = (
+            f"# Review {plan['name']}\n\nPlan: {plan_ref}\n\nConfig: {config_ref}\n\n"
+            f"Target: {scope['target']}\n\nScope: {bundle['scopeHash']}\n\n"
+            f"{plan['businessUnderstanding']['summary']}\n\n"
+            "## Scope and budgets\n\n```json\n"
+            + json.dumps(scope, indent=2)
+            + "\n```\n\n## Complete executable plan\n\n```json\n"
+            + json.dumps(plan, ensure_ascii=False, indent=2)
+            + "\n```\n"
+        )
         artifact_ref = store.put("artifacts", {"kind": "review", "content": content})
         bundle["artifactRef"] = artifact_ref
         bundle_ref = store.put("bundles", bundle)
         return {**bundle, "reviewBundleRef": bundle_ref, "status": "awaiting_review"}
 
-    def get_artifact(self, project_ref: str, artifact_ref: str, offset: int = 0,
-                     limit: int = 200) -> dict[str, Any]:
+    def get_artifact(
+        self, project_ref: str, artifact_ref: str, offset: int = 0, limit: int = 200
+    ) -> dict[str, Any]:
         store = self.project(project_ref)
         asset = store.get("artifacts", artifact_ref)
         if offset < 0 or not 1 <= limit <= 200:
@@ -295,29 +400,51 @@ class Service:
         lines = asset["content"].splitlines()
         if asset["kind"] == "review":
             atomic_write(store.root / "presented" / f"{artifact_ref}.json", {"readAt": time.time()})
-        return {"artifactRef": artifact_ref, "kind": asset["kind"], "offset": offset,
-                "content": "\n".join(lines[offset:offset + limit]),
-                "nextOffset": offset + limit if offset + limit < len(lines) else None}
+        return {
+            "artifactRef": artifact_ref,
+            "kind": asset["kind"],
+            "offset": offset,
+            "content": "\n".join(lines[offset : offset + limit]),
+            "nextOffset": offset + limit if offset + limit < len(lines) else None,
+        }
 
-    def record_decision(self, project_ref: str, bundle_ref: str, plan_ref: str, scope_hash: str,
-                        decision: str, source: str, confirmation: str) -> dict[str, Any]:
+    def record_decision(
+        self,
+        project_ref: str,
+        bundle_ref: str,
+        plan_ref: str,
+        scope_hash: str,
+        decision: str,
+        source: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
         store = self.project(project_ref)
         bundle = store.get("bundles", bundle_ref)
         if bundle["planRef"] != plan_ref or bundle["scopeHash"] != scope_hash:
             raise HorusError("review_mismatch")
         if not (store.root / "presented" / f"{bundle['artifactRef']}.json").is_file():
             raise HorusError("review_not_presented")
-        if decision not in {"approved", "rejected"} or source not in {
-                "conversation", "CLI", "test-only"} or not confirmation.strip():
+        if (
+            decision not in {"approved", "rejected"}
+            or source not in {"conversation", "CLI", "test-only"}
+            or not confirmation.strip()
+        ):
             raise HorusError("invalid_review_decision")
-        record = {**bundle, "reviewBundleRef": bundle_ref, "decision": decision,
-                  "source": source, "confirmation": confirmation, "recordedAt": time.time(),
-                  "trust": "test-only" if source == "test-only" else "local_recorded"}
+        record = {
+            **bundle,
+            "reviewBundleRef": bundle_ref,
+            "decision": decision,
+            "source": source,
+            "confirmation": confirmation,
+            "recordedAt": time.time(),
+            "trust": "test-only" if source == "test-only" else "local_recorded",
+        }
         ref = store.put("reviews", record)
         return {"reviewRef": ref, "status": decision, "trust": record["trust"]}
 
-    def review_gate(self, project_ref: str, plan_ref: str, review_ref: str | None,
-                    environment: str) -> dict[str, Any]:
+    def review_gate(
+        self, project_ref: str, plan_ref: str, review_ref: str | None, environment: str
+    ) -> dict[str, Any]:
         if not review_ref:
             raise HorusError("review_required")
         store = self.project(project_ref)
@@ -334,4 +461,13 @@ class Service:
         if canonical({k: record[k] for k in bundle}) != canonical(bundle):
             raise HorusError("review_mismatch")
         self.validate_plan(project_ref, plan_ref, record["configRef"], environment)
+        config = store.get("configs", record["configRef"])
+        expected_scope = {
+            "projectRef": project_ref,
+            "environment": environment,
+            "target": config["environments"][environment]["baseUrl"],
+            "policy": config["policy"],
+        }
+        if digest(expected_scope) != record["scopeHash"]:
+            raise HorusError("review_mismatch", "Approval belongs to a different project or scope")
         return cast(dict[str, Any], record)

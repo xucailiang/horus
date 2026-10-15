@@ -17,8 +17,9 @@ class HorusError(Exception):
 
 
 def canonical(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=False, allow_nan=False).encode()
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    ).encode()
 
 
 def digest(value: Any) -> str:
@@ -45,12 +46,12 @@ def atomic_write(path: Path, value: Any) -> None:
 
 
 @contextmanager
-def file_lock(path: Path, *, blocking: bool = True) -> Iterator[None]:
+def file_lock(path: Path, *, blocking: bool = True) -> Iterator[int]:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
-        yield
+        yield fd
     finally:
         os.close(fd)
 

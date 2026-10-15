@@ -1,25 +1,89 @@
 # horus
 
-业务无关的 AI 原生后端接口测试平台。Codex/Claude 中的 LLM 读取接口文档和项目源码，分析业务流程、规则与数据依赖，并将这些理解与测试步骤一起写入版本化计划。人工审核该版本后，MCP/CLI/CI 执行计划，通过 Hurl 完成功能链路、通过 k6 完成基础并发压测，输出统一证据和报告。
+**Agent-planned, human-reviewed HTTP API testing.**
 
-产品固定提供三部分：基于 Python FastMCP 的标准 MCP Server、调用同一执行核心的 horus CLI，以及指导 Agent 完成分析、计划、送审、执行和诊断的 horus Skill。业务知识属于各被测项目的计划资产，平台核心不写死任何业务流程。
+[简体中文](README.zh-CN.md) · [Setup](docs/usage.md) · [Test workflow](docs/testing.md) · [Architecture](docs/architecture.md)
 
-主要使用场景是用户在 Codex / Claude Code 中连接 horus MCP，以自然语言发起测试、确认计划、查看报告。CLI 负责安装诊断、辅助操作和 CI；日常测试全链路经 MCP 完成，不要求切换到终端或手写项目文件。
+horus turns an API definition and business requirements into a reviewable test
+plan, deterministic execution, cleanup, and a factual report. Codex or Claude Code
+handles understanding and planning; MCP connects the host to the execution core,
+and a packaged Skill guides the complete workflow.
 
-当前状态：需求与技术方案已保存，尚未实现程序；文档中的命令是待实施接口。
+```text
+OpenAPI / Swagger → Agent plan → Human confirmation → Hurl + k6 → Report
+```
 
-开发、测试和 CI 统一使用 Python 3.12 与 uv；项目已用 .python-version 声明版本。实施时以 pyproject.toml 和 uv.lock 锁定依赖。
+Any HTTP backend can be tested, including Rust, Go, TypeScript, and Python services.
+Source code is optional: the host can read it with its existing tools. Relevant
+chat material or source findings go directly into plan context.
 
-用户主流程：提供部署地址、文档、源码、凭据和测试边界 → 自动生成业务理解与测试计划 → 在当前 Agent 对话或 CLI 审核确认 → 自动准备数据、执行、校验和清理 → 查看自动生成的报告。补充测试单独送审，不阻塞本轮报告。
+## What works
 
-- [Agent + MCP 主使用链路与双客户端验收](docs/AGENT-MCP-WORKFLOW.md)
-- [需求文档 v0.7](docs/PRD-horus.md)
-- [技术方案、接口和首个交付任务](docs/TECHNICAL-DESIGN.md)
-- [ADR-0001：架构决定](docs/decisions/0001-agent-tools-and-execution-engines.md)
-- [ADR-0002：horus、FastMCP 与计划审核](docs/decisions/0002-horus-fastmcp-and-plan-review.md)
-- [ADR-0003：自动测试闭环与 Python 3.12 / uv](docs/decisions/0003-autonomous-workflow-and-python312.md)
-- [ADR-0004：MCP 主入口与首次接入](docs/decisions/0004-mcp-primary-workflow.md)
+- Import OpenAPI/Swagger definition URLs and common Swagger UI links.
+- Save typed business understanding, evidence, coverage, requests, assertions,
+  captured variables, cleanup, and fixed load in an immutable plan.
+- Display the exact plan and scope, then ask the user to reply **“我确定”** before
+  recording approval. A general request to test is not approval.
+- Execute HTTP checks with Hurl and basic fixed-VU load with k6; validate response
+  data as well as status codes and latency.
+- Run in a detached Worker with idempotent starts, bounded cancellation/cleanup,
+  reconnection, project isolation, and engine shutdown after Worker death.
+- Produce JSON, Markdown, JUnit, and MCP-readable reports automatically.
+- Export/import reviewed packages and replay them through the base CLI without
+  MCP or a model.
+- Optionally attach authorized SSH CPU/GPU/memory observations collected by the
+  host Agent. Baselines inform proposed load; approved concurrency stays fixed.
 
-首个正式交付包含：真实 Agent 生成业务理解与计划、人工审核、鉴权/创建/查询/数据断言/失败清理、基础并发指标与阈值、MCP/CLI 一致执行，以及关闭 Agent 后对已审核版本的 CI 回放。增补或修改计划需要重新审核。
+## Quick start
 
-采用两个流程结构不同的永久测试后端，验证数据、权限、状态、异步等待和延迟问题；跨业务接入不修改平台核心。不单独做 PoC。
+Use Python 3.12 and uv 0.9.11. The engine installer also needs GitHub CLI (`gh`).
+
+```sh
+git clone https://github.com/xucailiang/horus.git
+cd horus
+uv sync --python 3.12 --frozen --extra mcp --group dev
+uv run python scripts/install_engines.py
+uv run horus mcp --workspace /absolute/path/to/test-workspace
+```
+
+The installer downloads official **Hurl 8.0.1** and **k6 2.3.0** releases and checks
+SHA-256 before installing them locally. macOS and Linux are supported. Existing
+matching binaries can be selected with `HORUS_HURL_BIN` / `HORUS_K6_BIN`.
+
+MCP configuration and Skill installation are separate steps. Run
+`uv run horus skill` to locate the bundled Skill, then follow the
+[Codex / Claude Code setup guide](docs/usage.md).
+
+## Development and verification
+
+```sh
+uv run ruff check src tests scripts
+uv run mypy src
+uv run pytest -q
+uv build
+uv run python -m tests.acceptance.verify_wheel
+```
+
+The permanent HTTP fixture verifies lifecycle cleanup, data errors, latency
+failures, load thresholds, review gates, disconnects, cancellation, and crash
+behavior. The wheel check runs normal and failing scenarios in a clean environment
+without FastMCP or a model. See [the test workflow](docs/testing.md).
+
+## Project status
+
+**Early development; M1 is not complete.** The first execution slice and base-wheel
+replay are locally verified. Complete native two-client generation and actual
+human approval, a second workflow backend, identity/branch/poll steps, parallel
+functional cases, regular-expression assertions, and explicit repair cleanup
+remain open. Automated fixture approvals do not count as human acceptance.
+
+Detailed Chinese [requirements](docs/PRD-horus.md),
+[technical design](docs/TECHNICAL-DESIGN.md), and
+[implementation notes](docs/IMPLEMENTATION.md) describe the intended milestone
+and current evidence. Use `horus_get_capabilities` for implemented capabilities.
+
+## Contributing and license
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for the development and review workflow.
+Contributions and documentation improvements are welcome in English and Chinese.
+Licensed under [MIT](LICENSE).
