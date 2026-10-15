@@ -1,0 +1,1 @@
+"""Optional FastMCP entry point."""
