@@ -12,6 +12,7 @@ from openapi_spec_validator import validate
 
 from horus.adapters.openapi import load_api
 from horus.core.models import Plan, ProjectConfig
+from horus.core.presentation import plan_document
 from horus.core.store import AssetStore, HorusError, atomic_write, canonical, digest, file_lock
 from horus.core.validation import FlowValidator
 
@@ -290,6 +291,70 @@ class Service:
         if mapped - expected or expected - mapped - uncovered:
             raise HorusError("incomplete_coverage", str(sorted(expected - mapped - uncovered)))
 
+    def preview_plan(
+        self, project_ref: str, raw: dict[str, Any], config_ref: str, environment: str
+    ) -> dict[str, Any]:
+        """Validate and render in memory. No plan, review or test directory is written."""
+        plan = Plan.model_validate(raw)
+        store = self.project(project_ref)
+        if plan.parentPlanRef:
+            store.get("plans", plan.parentPlanRef)
+        config = ProjectConfig.model_validate(store.get("configs", config_ref))
+        validation = self._validate(store, plan, config, environment)
+        scope = {
+            "projectRef": project_ref,
+            "configRef": config_ref,
+            "environment": environment,
+            "plan": plan.model_dump(mode="json"),
+        }
+        return {
+            "previewRef": "preview_" + digest(scope),
+            "status": "preview",
+            "content": plan_document(plan, config, environment, validation),
+            "validation": validation,
+        }
+
+    def confirm_plan(
+        self,
+        project_ref: str,
+        raw: dict[str, Any],
+        config_ref: str,
+        environment: str,
+        preview_ref: str,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        """Persist the unchanged preview only after a real human confirmation in chat."""
+        preview = self.preview_plan(project_ref, raw, config_ref, environment)
+        if preview["previewRef"] != preview_ref:
+            raise HorusError("preview_mismatch", "Display the changed draft for fresh confirmation")
+        if not confirmation.strip():
+            raise HorusError("invalid_review_decision")
+        plan_ref = self.save_plan(project_ref, raw)["planRef"]
+        bundle = self.prepare_review(project_ref, plan_ref, config_ref, environment,
+                                     preview=preview)
+        store = self.project(project_ref)
+        bundle_ref = bundle["reviewBundleRef"]
+        # The host displayed the in-memory preview before receiving this confirmation.
+        atomic_write(
+            store.root / "presented" / f"{bundle['artifactRef']}.json",
+            {"confirmedAt": time.time(), "previewRef": preview_ref, "via": "conversation_preview"},
+        )
+        review = self.record_decision(
+            project_ref,
+            bundle_ref,
+            plan_ref,
+            bundle["scopeHash"],
+            "approved",
+            "conversation",
+            confirmation,
+        )
+        return {
+            **review,
+            "planRef": plan_ref,
+            "reviewBundleRef": bundle_ref,
+            "previewRef": preview_ref,
+        }
+
     def save_plan(self, project_ref: str, raw: dict[str, Any]) -> dict[str, Any]:
         plan = Plan.model_validate(raw)
         store = self.project(project_ref)
@@ -313,7 +378,8 @@ class Service:
         }
 
     def prepare_review(
-        self, project_ref: str, plan_ref: str, config_ref: str, environment: str
+        self, project_ref: str, plan_ref: str, config_ref: str, environment: str,
+        *, preview: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         store = self.project(project_ref)
         validation = self.validate_plan(project_ref, plan_ref, config_ref, environment)
@@ -347,6 +413,8 @@ class Service:
         )
         artifact_ref = store.put("artifacts", {"kind": "review", "content": content})
         bundle["artifactRef"] = artifact_ref
+        if preview is not None:
+            bundle.update(previewRef=preview["previewRef"], previewContent=preview["content"])
         bundle_ref = store.put("bundles", bundle)
         return {**bundle, "reviewBundleRef": bundle_ref, "status": "awaiting_review"}
 

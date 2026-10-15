@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from horus.core.models import Plan, ResourceMetrics
+from horus.core.reports import snapshot_test
 from horus.core.service import Service
 from horus.core.store import HorusError, atomic_write, digest, file_lock
 
@@ -73,6 +74,7 @@ class Runs:
                 "scopeHash": review["scopeHash"],
                 "createdAt": time.time(),
             }
+            intent.update(snapshot_test(self.service, root, intent))
             atomic_write(root / "intent.json", intent)
             atomic_write(root / "state.json", {**intent, "status": "queued"})
             atomic_write(key, {"parameters": parameters, "runId": run_id})

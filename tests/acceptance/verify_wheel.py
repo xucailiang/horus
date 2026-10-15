@@ -61,6 +61,8 @@ def main() -> None:
             "p=Path(horus.__file__).parent; "
             "assert (p/'adapters/load.js').is_file(); "
             "assert (p/'adapters/guardian.py').is_file(); "
+            "assert (p/'core/report.css').is_file(); "
+            "assert (p/'core/report.js').is_file(); "
             "assert (p/'skill/SKILL.md').is_file(); "
             "assert (p/'skill/references/resource-monitoring.md').is_file()",
         ], env=env, cwd=root, check=True)

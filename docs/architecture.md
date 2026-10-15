@@ -8,9 +8,10 @@ does not run a model, clone business repositories, or build a source index.
 flowchart LR
     API[OpenAPI / Swagger URL] --> Agent[Host Agent + Skill]
     Context[Optional chat / source findings] --> Agent
-    Agent --> Plan[Validated immutable plan]
-    Plan --> Review[Human reviews exact plan and scope]
-    Review --> Worker[Detached Worker]
+    Agent --> Draft[Validate draft in memory]
+    Draft --> Review[Readable plan and confirmation in chat]
+    Review --> Plan[Save the approved plan]
+    Plan --> Worker[Detached Worker]
     Worker --> Engines[Hurl / k6]
     Engines --> Report[Cleanup + factual report]
 ```
@@ -25,7 +26,8 @@ flowchart LR
 | `core/store.py` | Content hashes, atomic writes, file locking, project-scoped references |
 | `core/runs.py` | Idempotent starts, persistent state, cancellation, cleanup recovery, report attachments |
 | `core/runner.py` | Variable resolution, execution, captures, assertions, cleanup |
-| `core/reports.py` | Verdicts, factual reports, reviewed context and observed coverage |
+| `core/reports.py` | Verdicts, per-run plan snapshots, factual reports and observed coverage |
+| `core/presentation.py`, `core/html_report.py` | Readable previews and offline interactive reports from approved plans |
 | `core/values.py` | Case data, identity scopes, credential aliases, dynamic values, redaction |
 | `adapters/` | OpenAPI discovery and bounded Hurl/k6 subprocess adapters |
 | `worker.py` | Detached run ownership, heartbeat, project execution lease |
@@ -108,8 +110,26 @@ Missing cleanup inputs cannot produce a pass. The original report stays intact.
 
 ## Reports and optional resource observations
 
-Runs produce `summary.json`, `report.json`, `report.md`, and `junit.xml`, plus an
-MCP-readable report artifact. Runtime payloads are redacted before persistence.
+`horus_preview_plan` validates and renders a draft without writing it. Its digest
+binds the complete normalized plan, config reference, project and environment.
+The host displays the readable text directly in chat. After a real confirmation,
+`horus_confirm_plan` verifies that fingerprint, saves the immutable plan and records
+the approval. This uses the same trusted-local approval model as the legacy tools.
+
+Each execution uses its existing `.horus/runs/<runId>/` directory as one test version.
+Before launching the Worker it snapshots `plan.md`, `plan.json`, `config.json` and
+`review.json` there. Completion adds `report.html`, `summary.json`, `report.json`,
+`report.md`, and `junit.xml`. Start retries reuse that directory; new runs get a
+new one. `testDirectory`, `reportPath` and `htmlArtifactRef` are returned to the host.
+The HTML is self-contained and offline, with local CSS/JS and HTML/SVG flow diagrams
+built from approved cases. It preserves unrun steps, both branch paths, bounded
+waiting and cleanup, and links each node to its measured evidence. UI text uses
+`plan.report.language`; host-authored titles and descriptions use the conversation
+language. Chinese and English labels are built in; other locales require a full
+label dictionary. Raw payloads are HTML-escaped and never evaluated as diagrams or
+scripts; the page has no network requests and restricts scripts with a CSP hash.
+
+Both HTML and Markdown have MCP-readable artifact references. Runtime payloads are redacted before persistence.
 Control fields and verdicts are kept separate from payload redaction.
 The JSON and paged Markdown artifact retain the plan's business understanding,
 sources, coverage mappings, assumptions, conflicts, and uncovered behavior. Observed

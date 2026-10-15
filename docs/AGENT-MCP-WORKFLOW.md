@@ -58,12 +58,14 @@ Skill 的共享正文来自随包分发的 skills/horus。Codex 可安装到 ~/.
 | 创建或恢复项目 | 从自然语言目标选择已有项目或新建 | list_projects / open_project 返回 projectRef 与上下文摘要，不要求 CLI 初始化 |
 | 提交接入草案 | Agent 整理目标地址、环境、凭据绑定和边界 | stage_project_config 保存不可变 configRef，列缺口；草案不自动扩大权限 |
 | 理解接口与源码 | 导入 OpenAPI/Swagger 链接；按需使用宿主源码能力或聊天资料 | import_api / get_context；可选源码由宿主阅读，聊天/源码依据随 Plan.supportingContext 保存 |
-| 生成并校验计划 | LLM 产出业务理解、覆盖、链路、数据、断言和清理 | save_plan / validate_plan，问题带字段位置和修复建议 |
-| 展示审核材料 | Agent 展示当前具体版本及范围、风险与未知项 | prepare_review 返回 reviewBundleRef、planRef、configRef、scopeHash 和可读取材料 |
-| 用户确认 | 用户对展示版本回复“我确定”，或提出修改 | record_review_decision 记录明确决定和来源；修改后重新展示，不能沿用旧批准 |
+| 生成并校验草稿 | Agent 产出业务理解、链路、检查和清理，说明语言跟随当前对话 | preview_plan 在内存中校验并生成可读文本，返回 previewRef，不保存计划 |
+| 在对话中展示 | 直接回复可读计划、范围、负载上限和未覆盖项，不使用 Ask 卡片 | 用户先在对话里读计划并提出修改，此时不创建测试目录 |
+| 确认后保存 | 用户确认刚展示的草稿 | confirm_plan 校验 previewRef，保存同一计划并记录真实确认；修改后需重新展示 |
 | 执行 | Agent 一次提交 planRef、reviewRef、环境及 requestId | start_run 返回 runId；由 reviewRef 固定配置，独立 Worker 执行，不逐 HTTP 请求往返 Agent |
 | 等待 | Agent 自动有界等待并按需显示进展 | wait_run / get_run 返回状态、摘要；断开重连后可恢复查询 |
-| 报告 | 核心自动生成，Agent 读取并解释 | 终态返回报告摘要和 artifactRef，get_artifact 分页读取完整证据/报告 |
+| 报告 | 打开与当前对话同语言的 HTML，先看业务逻辑图，再看数据 | 返回 testDirectory、reportPath 和 htmlArtifactRef；get_artifact 可分页读取 HTML |
+
+每次执行作为一轮版本测试，计划和报告同放在 `projects/<projectRef>/.horus/runs/<runId>/`，新一轮不覆盖上一轮。目录含 `plan.md`、`plan.json`、`config.json`、`review.json`、`report.html`、`report.json`、`report.md` 和 `junit.xml`。HTML 可离线打开，流程图来自已确认计划，节点可跳到实际结果，支持筛选、搜索和展开详情。
 
 工具在协议中使用 horus_ 前缀。业务工具显式携带 projectRef，引用跨项目校验；同一个 MCP 服务处理不同项目时不依赖可被别的会话覆盖的全局“当前项目”。
 

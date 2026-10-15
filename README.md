@@ -40,9 +40,9 @@ HTTP.
 The Agent uses horus through MCP. A bundled Skill guides it through understanding
 the system, designing the tests, and delivering the report. The plan includes the
 business rules and their evidence, requests, test data, assertions, cleanup, load,
-and gaps in coverage. After showing the exact plan and target, the Skill asks you
-to reply **“我确定”**. Your confirmation applies to that version and scope; changes
-need another review.
+and gaps in coverage. The Agent shows a readable draft directly in the conversation.
+It saves and executes that draft after you confirm. Your confirmation applies to
+that version and scope; changes need another review.
 
 A plan can switch between declared identities to check ownership and access rules.
 Each identity keeps its own authentication values; case data such as resource IDs
@@ -55,8 +55,11 @@ observations until the final checks run.
 
 Once approved, a Worker follows the plan, prepares the data, runs HTTP checks with
 Hurl and basic load tests with k6, then cleans up and produces a report. State and
-variables are isolated between runs. You can read the report in the conversation
-or use its JSON, Markdown, and JUnit files. Reviewed plans can also be exported,
+variables are isolated between runs. Each test has one directory containing its
+plan and reports. The main report is an offline HTML page in the conversation
+language: business flow, branches and cleanup come first, followed by the test data.
+Click a diagram node to inspect its result, filter cases, search, or expand details.
+JSON, Markdown, and JUnit files are also included. Reviewed plans can be exported,
 imported, and replayed through the base CLI without MCP or a model.
 
 Independent functional cases can run together, with an approved limit of one or

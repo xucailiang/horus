@@ -77,22 +77,56 @@ a functional check for those patterns. An HTTP response's regex checks have
 a one-second matching-process limit; exceeding it reports an execution error and
 still enters cleanup. Load matching remains within the approved k6 run limits.
 
-It then prepares and reads the fixed review material, shows the exact target,
-actions, cleanup, load, thresholds, and gaps, and asks you to reply **“我确定”**
-to approve. Changes require a fresh review. General intent to test, or quoting
-the confirmation phrase, does not authorize an undisplayed plan.
+Before saving, the Agent calls `horus_preview_plan` to validate the draft in memory.
+It shows the readable plan **directly in chat**, including the business goal, call
+chain, checks, writes, cleanup, request/time/load limits, and gaps. It does not put
+the plan in an Ask or multiple-choice tool card. After your actual confirmation,
+`horus_confirm_plan` saves the unchanged draft and records the decision. Its
+`previewRef` binds the full plan, config, project and environment; a changed draft
+needs a fresh preview and confirmation. Neither preview nor confirmation sends
+requests to the target. The existing save/prepare/record tools support saved plans
+and CLI replay.
 
-After the real decision is recorded, it starts once with a stable request ID,
-waits in bounded calls, and retrieves the automatic report. Missing responses do
-not justify starting a second run. Reports remain available after reconnection.
-After restoring a project, read a saved `planRef` with `horus_get_plan`, following
-its pages to `nextOffset: null`. Review and report references use `horus_get_artifact`.
-Reading plan JSON does not replace showing the fixed review bundle or recording
-the user's decision.
-The report includes the reviewed business understanding, evidence references,
-planned coverage, and the checks actually evaluated. It keeps untested behavior
-visible. Failure requests, responses, and bounded load samples are readable through
-the paged MCP artifact; excerpts are marked, and local JSON retains the full result.
+After confirmation, the Agent starts once with a stable request ID and waits in
+bounded calls. Missing responses do not justify starting a second run. Each
+execution is one test version, including replays and cleanup recovery. The returned
+`testDirectory` is the run's directory:
+
+```text
+projects/<projectRef>/.horus/runs/<runId>/
+  plan.md         confirmed readable plan
+  plan.json       exact executable plan snapshot
+  config.json     configuration; credential binding names only
+  review.json     approval and its scope
+  report.html     main interactive report
+  report.json     full redacted result
+  report.md       Markdown evidence
+  junit.xml       machine-readable result
+```
+
+The plan is saved after confirmation; the directory and plan snapshots are created
+when execution starts. Reports appear there when it finishes. A retry of the same
+start request returns the existing version. New runs never overwrite earlier ones.
+
+Set `plan.report.language` to the current Codex/Claude Code conversation language,
+for example `zh-CN` or `en`. Use that language for plan names, business descriptions,
+case/step `title`, and assertion `description`. English and Chinese UI text is built
+in; other languages require translations of all `report.labels` keys listed in the
+plan schema's `x-labels`. The report never guesses from the machine locale.
+
+Open the returned `reportPath`. The offline HTML first explains the approved
+business flow, then shows its executable sequence as a diagram, including branches,
+waiting and cleanup. Clicking a node opens that action's result. Filters, search,
+expandable checks and printing help inspect the data. Unrun actions and unselected
+paths remain visible; load results use aggregate evidence. Raw details remain in
+expandable sections. The diagram uses local HTML/SVG and needs no Mermaid CDN.
+
+`htmlArtifactRef` also provides the self-contained HTML through `horus_get_artifact`;
+follow every page before saving it. Sibling file links require copying the whole
+test directory. The legacy `artifactRef` provides paged Markdown, including bounded
+failure evidence; excerpts are marked and `report.json` retains the full result.
+After restoring a project, use `horus_get_plan` to read a saved plan, following
+`nextOffset` to the end. Reading an old plan alone does not approve a new test.
 
 Only place independent functional chains in separate cases. Consecutive functional
 cases share the reviewed `policy.limits.maxFunctionalParallelCases` limit (one or

@@ -6,7 +6,9 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from horus.core.models import BranchStep, LoadStep, Plan, ResourceMetrics, Step
+from horus.core.html_report import render_html
+from horus.core.models import BranchStep, LoadStep, Plan, ProjectConfig, ResourceMetrics, Step
+from horus.core.presentation import plan_document
 from horus.core.resources import resource_summary
 from horus.core.service import Service
 from horus.core.steps import request_action, walk_steps
@@ -99,20 +101,36 @@ def execution_coverage(
     return {"steps": step_results, "assertions": assertion_results}
 
 
-def report_context(service: Service, result: dict[str, Any]) -> None:
+def report_context(service: Service, result: dict[str, Any]) -> Plan | None:
     store = service.project(result["projectRef"])
     issues = []
+    plan = None
     try:
         plan = Plan.model_validate(store.get("plans", result["planRef"]))
         result["testDesign"] = {
-            key: value for key, value in plan.model_dump(mode="json").items()
-            if key in {"name", "sourceRefs", "businessUnderstanding", "coverage",
-                       "supportingContext", "identityProfiles", "parentPlanRef", "changeReason"}
+            key: value
+            for key, value in plan.model_dump(mode="json").items()
+            if key
+            in {
+                "name",
+                "sourceRefs",
+                "businessUnderstanding",
+                "coverage",
+                "supportingContext",
+                "identityProfiles",
+                "parentPlanRef",
+                "changeReason",
+                "report",
+            }
         }
         result["executionCoverage"] = execution_coverage(plan, result["cases"])
     except (HorusError, ValidationError) as exc:
-        issues.append({"code": exc.code if isinstance(exc, HorusError) else "invalid_plan",
-                       "location": "testDesign"})
+        issues.append(
+            {
+                "code": exc.code if isinstance(exc, HorusError) else "invalid_plan",
+                "location": "testDesign",
+            }
+        )
     try:
         if "configRef" in result and "environment" in result:
             config = store.get("configs", result["configRef"])
@@ -121,12 +139,18 @@ def report_context(service: Service, result: dict[str, Any]) -> None:
             review = store.get("reviews", result["reviewRef"])
             result["target"] = review["scope"]["target"]
     except (HorusError, KeyError) as exc:
-        issues.append({"code": exc.code if isinstance(exc, HorusError) else "missing_target",
-                       "location": "target"})
+        issues.append(
+            {
+                "code": exc.code if isinstance(exc, HorusError) else "missing_target",
+                "location": "target",
+            }
+        )
     if issues:
         result["reportIssues"] = issues
         if result["verdict"] == "passed":
             result["verdict"] = "inconclusive"
+
+    return plan
 
 
 def design_lines(result: dict[str, Any]) -> list[str]:
@@ -185,13 +209,44 @@ def evidence_excerpt(value: Any) -> Any:
             "totalCharacters": len(serialized), "fullEvidence": "report.json"}
 
 
+def snapshot_test(service: Service, root: Path, intent: dict[str, Any]) -> dict[str, str]:
+    """One run is one test version: its plan and reports live in this same directory."""
+    store = service.project(intent["projectRef"])
+    raw = store.get("plans", intent["planRef"])
+    plan = Plan.model_validate(raw)
+    review = store.get("reviews", intent["reviewRef"])
+    config = ProjectConfig.model_validate(store.get("configs", intent["configRef"]))
+    content = review.get("previewContent") if review["planRef"] == intent["planRef"] else None
+    if not content:
+        validation = service._validate(store, plan, config, intent["environment"])
+        content = plan_document(plan, config, intent["environment"], validation)
+    atomic_write(root / "plan.json", raw)
+    atomic_write(root / "config.json", config.model_dump(mode="json"))
+    atomic_write(root / "review.json", review)
+    (root / "plan.md").write_text(content, encoding="utf-8")
+    (root / "plan.md").chmod(0o600)
+    return {"testDirectory": str(root), "reportPath": str(root / "report.html")}
+
+
 def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[str, Any]:
     result["verdict"] = verdict(result["cases"])
     if (result["status"] in {"cancelled", "interrupted"} or result.get("residue")) and result[
         "verdict"
     ] == "passed":
         result["verdict"] = "inconclusive"
-    report_context(service, result)
+    plan = report_context(service, result)
+    if plan is not None:
+        try:
+            result.update(snapshot_test(service, root, result))
+        except (HorusError, ValidationError, KeyError) as exc:
+            result.setdefault("reportIssues", []).append(
+                {
+                    "code": exc.code if isinstance(exc, HorusError) else "snapshot_unavailable",
+                    "location": "planSnapshot",
+                }
+            )
+            if result["verdict"] == "passed":
+                result["verdict"] = "inconclusive"
     result.setdefault("finishedAt", time.time())
     lines = [
         f"# {result['verdict'].upper()}",
@@ -205,12 +260,14 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
     ]
     lines.extend(design_lines(result))
     if scheduling := result.get("scheduling"):
-        lines.extend([
-            f"Functional cases: peak {scheduling['peakFunctionalCases']}, "
-            f"approved limit {scheduling['functionalCaseLimit']} (including cleanup).",
-            "Performance cases run exclusively; functional concurrency is not load evidence.",
-            "",
-        ])
+        lines.extend(
+            [
+                f"Functional cases: peak {scheduling['peakFunctionalCases']}, "
+                f"approved limit {scheduling['functionalCaseLimit']} (including cleanup).",
+                "Performance cases run exclusively; functional concurrency is not load evidence.",
+                "",
+            ]
+        )
     suite = ET.Element("testsuite", name="horus")
     if result.get("cleanupFrom"):
         lines.extend(
@@ -225,9 +282,16 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
                 lines.append(f"- {step['id']}: observation")
                 continue
             if step.get("kind") == "branch" and step["status"] not in {"error", "blocked"}:
-                lines.extend([f"- {step['id']}: {step.get('selected', step.get('reason'))}", "",
-                              "```json", json.dumps(step.get("conditions", []), indent=2),
-                              "```", ""])
+                lines.extend(
+                    [
+                        f"- {step['id']}: {step.get('selected', step.get('reason'))}",
+                        "",
+                        "```json",
+                        json.dumps(step.get("conditions", []), indent=2),
+                        "```",
+                        "",
+                    ]
+                )
                 continue
             count += 1
             identity = f" ({step['identityRef']})" if step.get("identityRef") is not None else ""
@@ -245,8 +309,17 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
                 lines.extend(["", "```json", json.dumps(step["metrics"], indent=2), "```", ""])
             if step.get("kind") == "poll" and "observations" in step:
                 observations = json.dumps(step["observations"], indent=2)
-                lines.extend(["", f"Polling: {step['attempts']} attempts", "",
-                              "```json", observations, "```", ""])
+                lines.extend(
+                    [
+                        "",
+                        f"Polling: {step['attempts']} attempts",
+                        "",
+                        "```json",
+                        observations,
+                        "```",
+                        "",
+                    ]
+                )
                 ET.SubElement(node, "system-out").text = observations
             if step["status"] != "passed" or step.get("failureSamples"):
                 details = {
@@ -287,11 +360,19 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
         "artifacts", {"kind": "report", "content": text}
     )
     result["artifactRef"] = artifact
+    result.update(testDirectory=str(root), reportPath=str(root / "report.html"))
+    html = render_html(result, plan.model_dump(mode="json") if plan else None)
+    result["htmlArtifactRef"] = service.project(result["projectRef"]).put(
+        "artifacts", {"kind": "report-html", "mediaType": "text/html", "content": html}
+    )
+    (root / "report.html").write_text(html, encoding="utf-8")
+    (root / "report.html").chmod(0o600)
     atomic_write(root / "report.json", result)
     (root / "report.md").write_text(text)
     (root / "junit.xml").write_bytes(ET.tostring(suite, encoding="utf-8", xml_declaration=True))
-    summary = {k: v for k, v in result.items()
-               if k not in {"cases", "testDesign", "executionCoverage"}}
+    summary = {
+        k: v for k, v in result.items() if k not in {"cases", "testDesign", "executionCoverage"}
+    }
     summary["counts"] = {"steps": count, "failures": failures}
     atomic_write(root / "summary.json", summary)
     atomic_write(root / "state.json", summary)

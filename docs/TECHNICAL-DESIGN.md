@@ -2,7 +2,7 @@
 
 当前范围：本阶段不建设 GitHub Actions 等 CI 流水线，使用本地测试、静态检查和打包验证。原设计中的 CI 部分仅作为后续参考。
 
-方案基线 v0.4，2026-10-15。状态：首版核心流程已交付。用户确认按现有 MCP 实操引导、业务与调用链理解、功能及基础并发测试能力收尾，不再追加功能或验收场景。下文保留设计背景，当前实现、验证范围与限制见 [实施记录](IMPLEMENTATION.md)。
+方案基线 v0.4，2026-10-15；同日补充对话预览、逐轮归档和 HTML 报告约定。状态：首版核心流程已交付。用户确认按现有 MCP 实操引导、业务与调用链理解、功能及基础并发测试能力收尾，不再追加功能或验收场景。下文保留设计背景，当前实现、验证范围与限制见 [实施记录](IMPLEMENTATION.md)。
 
 依据：[PRD v0.7](PRD-horus.md)、[ADR-0003](decisions/0003-autonomous-workflow-and-python312.md) 与 [ADR-0004](decisions/0004-mcp-primary-workflow.md)。主使用路径及两客户端接入示例见 [Agent + MCP 链路](AGENT-MCP-WORKFLOW.md)。首个正式交付 M1 包含 MCP Server、CLI、Skill、自动接入、业务理解与人工审核、完整功能链路、基础并发压测、自动报告和两个后端的通用性验收，不单独建设 PoC。
 
@@ -121,7 +121,7 @@ workspace/projects/<projectRef>/.horus/
   reviews/     独立人工决定记录
   artifacts/   审核材料和报告
   requests/    幂等启动登记
-  runs/<runId>/ 状态、事件、报告和资源账本
+  runs/<runId>/ 每轮独立目录：已确认计划、配置、审核、HTML/JSON 报告、事件和账本
 ```
 
 内容寻址使用规范化 JSON 的 SHA-256；读取时验证哈希与项目归属。
@@ -376,7 +376,9 @@ thresholds:
 
 保存不等于批准，校验通过不等于批准。审核状态是围绕不可变 planRef 的独立记录：validated → awaiting_review → approved / rejected；新版本不会继承父版本的 approved 状态。原版记录与结果保留。核心会检查撤销标记，但当前没有受支持的撤销操作入口。
 
-审核材料由已保存计划确定性渲染为可经 MCP 读取的 Markdown 材料和 JSON 审核包，包含：
+新测试先调用 `horus_preview_plan` 在内存中校验并生成可读计划。Agent 直接回复在对话里，不放入 Ask 提问卡片，也不先保存计划或创建测试目录。用户确认后，`horus_confirm_plan` 校验 `previewRef` 是否仍绑定同一完整计划、配置、项目和环境，然后保存并记录真实确认。发生变化须重新展示确认。
+
+已有计划仍可通过底层工具生成固定 Markdown 材料和 JSON 审核包，包含：
 
 1. LLM 的业务理解、流程图/顺序、规则、状态和数据依赖，以及资料/源码定位。
 2. 流程与用例、规则与断言的映射，未覆盖、推断、冲突和未知项。
@@ -435,7 +437,7 @@ case 内按依赖执行，失败阻塞后续依赖，始终进入 cleanup；独�
 
 cleanup 按声明顺序执行，某步失败不阻止其他具备条件的清理。缺少变量解释跳过原因。只读轮询可配置有界重试；写操作不自动重试。
 
-运行使用已审核的总体时限；到期停止新增业务动作，进入独立有界 cleanup，再进入 reporting。测试失败、部分阻塞、引擎异常和用户取消均保留原判定并自动生成 summary.json/report.json/report.md/junit.xml 及报告引用，不要求额外执行 report 命令。文件存储故障须返回可定位的报告写入错误，不能假报报告已生成。
+运行使用已审核的总体时限；到期停止新增业务动作，进入独立有界 cleanup，再进入 reporting。测试失败、部分阻塞、引擎异常和用户取消均保留原判定并自动生成 summary.json/report.html/report.json/report.md/junit.xml 及报告引用，不要求额外执行 report 命令。文件存储故障须返回可定位的报告写入错误，不能假报报告已生成。
 
 配置中的 maxReportDurationMs 当前尚未强制执行；总体执行和清理时限已生效。
 
@@ -487,6 +489,8 @@ CLI approve 完整展示材料后，等待用户输入“我确定”。日常 A
 | horus_import_api | URL | sourceRef、定义与操作目录；多定义时返回候选 |
 | horus_register_source | kind=openapi/markdown、uri | 本地允许根目录中的文档快照 |
 | horus_get_context | sourceRef、offset、limit | 文档行、操作目录及依据 |
+| horus_preview_plan | plan、configRef、environment | 只在内存中校验并返回可读 content、previewRef，不写计划文件 |
+| horus_confirm_plan | 原 plan、configRef、environment、previewRef、真实 confirmation | 一致性检查通过后保存并记录确认，返回 planRef/reviewRef |
 | horus_save_plan | 含 businessUnderstanding/coverage 的 plan、parentPlanRef、changeReason | planRef、校验；不会批准或自动计算父版本差异 |
 | horus_get_plan | planRef、offset、limit<=200 | 项目内固定计划的 JSON 分页；校验内容哈希，读取不代表展示审核包或批准 |
 | horus_validate_plan | planRef | 结构/引用问题、覆盖缺口、凭据变量名称、执行规模 |
@@ -514,7 +518,7 @@ CLI approve 完整展示材料后，等待用户输入“我确定”。日常 A
 
 ### 6.3 Skill 与 CI
 
-通用 Skill 名称 horus，随包分发于 skills/horus/。流程为：自动接入资料/源码/边界 → 业务理解、链路、数据与配置草案 → 必要只读探测 → 保存、校验、集中展示审核材料 → 用户确认具体版本 → 记录人工决定并检查 → 启动、自动等待 → 呈现事实报告与解释 → 可选新版单独送审。共享正文及 Codex/Claude 配置，不写死业务。对话已有明确确认时 Agent 可落盘该决定，不能自行决定、伪造确认或把一般测试意图当成未展示版本的批准。
+通用 Skill 名称 horus，随包分发于 skills/horus/。流程为：自动接入资料/源码/边界 → 业务理解、链路、数据与配置草案 → 必要只读探测 → 内存校验、直接在对话里展示计划 → 用户确认 → 保存同一计划并记录决定 → 启动、自动等待 → 呈现事实报告与解释 → 可选新版单独送审。共享正文及 Codex/Claude 配置，不写死业务。对话已有明确确认时 Agent 可落盘该决定，不能自行决定、伪造确认或把一般测试意图当成未展示版本的批准。
 
 Skill 在当前会话可用时调用 wait_run，以每次最多 30s 的有界等待获取进展，完成后自动取摘要与报告；用户无需手动轮询 runId 或导出。会话关闭后 Worker 仍产出报告，重连可检索。准备不足在送审前集中说明；补测不让当前已批准任务无限延长。
 
@@ -524,7 +528,9 @@ Skill 在当前会话可用时调用 wait_run，以每次最多 30s 的有界等
 
 plan export 包含计划、所需 OperationCatalog/Schema 快照、依据摘要、审核记录和完整性 manifest，不包含凭据或完整源码仓库。CI 从受信来源取得包，import 验证哈希及引用闭包，保留已审核目标和配置。配置或审核不匹配立即阻塞，不从聊天重建步骤，也不要求 CI 重新分析代码。撤销通过受信版本库/产物更新传播，首版离线 CI 不承诺在线即时撤销。
 
-按用户确认，本阶段在本地启动永久 fixture 验证平台，不配置 CI 流水线。产物为 summary.json、report.json、report.md、junit.xml；失败证据保存在报告内，首条交付不强制 HTML/报告服务。已审核计划仍可通过无模型的 CLI 回放。
+按用户确认，本阶段在本地启动永久 fixture 验证平台，不配置 CI 流水线。每次执行是一轮版本测试，使用独立的 `.horus/runs/<runId>/` 目录，确认后启动时存入 plan.md、plan.json、config.json 和 review.json，结束后同目录生成 report.html、summary.json、report.json、report.md 和 junit.xml。
+
+HTML 是主要阅读入口，不需要报告服务或外部 CDN。`plan.report.language` 跟随当前 Codex/Claude Code 对话，计划名称、case/step title、assertion description 同语言；中英文界面文案内置，其他语言由宿主按 Schema 的 x-labels 提供完整翻译。页面先展示业务理解及从已批准 cases 生成的 HTML/SVG 流程图，包含分支、轮询和清理，再展示实际数据；节点可定位步骤结果，支持筛选、搜索、展开和打印。报告保留未执行路径及未覆盖项，技术细节可展开。终态返回 testDirectory、reportPath 和可经 MCP 分页获取的 htmlArtifactRef。已审核计划仍可通过无模型的 CLI 回放。
 
 ## 7. M1 首个正式交付及验收
 
@@ -557,7 +563,7 @@ Agent 从该后端自身资料生成身份、分支、轮询、状态与关系�
 ### 7.2 首条完整交付
 
 1. Codex/Claude 经 horus Skill/FastMCP 读取接口资料及可选的宿主源码结论，将业务流程、规则、数据依赖、依据和覆盖映射写入计划，包含功能 case 和性能 case。
-2. 保存并校验计划，展示审核材料。先证明未审核版本不能正式执行，再由人工审核具体版本与功能/负载范围。
+2. 内存校验并直接在对话里展示计划；用户确认后保存同一版本。未确认计划不能执行。
 3. 功能：登录 → 创建 → 查询/数据断言 → finally 删除 → 查询确认 404 → 注销。
 4. 性能：独立登录/创建 → 5 VU、100 次迭代读取及检查 → 汇总阈值 → 独立清理/确认/注销。
 5. 自动清理并输出带业务覆盖与 reviewRef 的报告，Agent 自动等待、呈现；关闭 Agent，通过 CLI/CI 重跑同一审核版本，仍自动出报告，不需要模型 key 或 MCP 在线。

@@ -168,3 +168,26 @@ async def test_mcp_plan_review_execution_and_report_survive_client_disconnect(tm
     finally:
         server.shutdown()
         server.server_close()
+
+
+async def test_mcp_preview_does_not_save_draft_and_exposes_html_metadata(tmp_path):
+    service = Service(tmp_path, read_roots=[FIXTURES])
+    project, original_plan, original_review = reviewed_regression_plan(
+        service, 'http://127.0.0.1:1'
+    )
+    raw = service.project(project).get('plans', original_plan)
+    raw['name'] = 'Preview only; no human approval is simulated'
+    raw['report'] = {'language': 'zh-CN'}
+    raw['cases'][0]['title'] = '核对创建后的记录'
+    config_ref = service.project(project).get('reviews', original_review)['configRef']
+    before = service.open_project(project)['refs']
+    async with Client(create_server(tmp_path, read_roots=[FIXTURES])) as client:
+        tools = {tool.name: tool for tool in await client.list_tools()}
+        assert tools['horus_preview_plan'].annotations.read_only_hint is True
+        assert 'horus_confirm_plan' in tools
+        preview = (await client.call_tool('horus_preview_plan', {
+            'projectRef': project, 'plan': raw, 'configRef': config_ref,
+        })).structured_content['payload']
+        assert '核对创建后的记录' in preview['content']
+        assert preview['previewRef'].startswith('preview_')
+    assert service.open_project(project)['refs'] == before

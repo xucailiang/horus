@@ -4,15 +4,20 @@ from typing import Annotated, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 from regress import Regex, RegressError
 
+from horus.core.report_text import EN
+
 
 class Model(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
-JsonPointer = Annotated[str, Field(
-    pattern=r"^(?:/(?:[^~/]|~[01])*)*$",
-    description='RFC 6901 JSON Pointer: /id, /items/0, or "" for the whole body; not $.id.',
-)]
+JsonPointer = Annotated[
+    str,
+    Field(
+        pattern=r"^(?:/(?:[^~/]|~[01])*)*$",
+        description='RFC 6901 JSON Pointer: /id, /items/0, or "" for the whole body; not $.id.',
+    ),
+]
 
 
 class Limits(Model):
@@ -174,6 +179,7 @@ class Assertion(Model):
     """
 
     id: str
+    description: str | None = Field(default=None, max_length=500)
     status: int | list[int] | None = None
     jsonPointer: JsonPointer | None = None
     header: str | None = None
@@ -224,6 +230,7 @@ class Assertion(Model):
 class HttpStep(Model):
     kind: Literal["http"] = "http"
     id: str
+    title: str | None = Field(default=None, max_length=160)
     operationId: str
     request: Request
     captures: dict[str, Capture] = Field(default_factory=dict)
@@ -260,6 +267,7 @@ class Thresholds(Model):
 class LoadStep(Model):
     kind: Literal["load"]
     id: str
+    title: str | None = Field(default=None, max_length=160)
     operationId: str
     request: Request
     assertions: list[Assertion] = Field(min_length=1)
@@ -356,6 +364,7 @@ class PollStep(Model):
 
     kind: Literal["poll"]
     id: str
+    title: str | None = Field(default=None, max_length=160)
     requestStep: HttpStep
     until: Predicate
     intervalMs: int = Field(ge=1, le=10000)
@@ -382,6 +391,7 @@ class BranchOutput(Model):
 class BranchStep(Model):
     kind: Literal["branch"]
     id: str
+    title: str | None = Field(default=None, max_length=160)
     predicate: Predicate
     identityRef: str | None = None
     thenSteps: list["Step"]
@@ -402,6 +412,7 @@ Step = HttpStep | LoadStep | PollStep | BranchStep
 
 class Case(Model):
     id: str
+    title: str | None = Field(default=None, max_length=160)
     kind: Literal["functional", "performance"]
     steps: list[Step] = Field(min_length=1)
     cleanup: list[HttpStep]
@@ -495,6 +506,30 @@ class IdentityProfile(Named):
     evidenceRefs: list[str] = Field(min_length=1)
 
 
+class ReportPresentation(Model):
+    language: str = Field(
+        default="en",
+        pattern=r"^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$",
+        description="Use the current Codex/Claude Code conversation language.",
+    )
+    labels: dict[str, str] = Field(
+        default_factory=dict,
+        json_schema_extra={"x-labels": {k: v for k, v in EN.items()}},
+        description="UI translations. Required in full for languages "
+        "other than English or Chinese; see x-labels for all keys.",
+    )
+
+    @model_validator(mode="after")
+    def translated_labels(self) -> Self:
+        if set(self.labels) - set(EN):
+            raise ValueError("Unknown report label key")
+        if self.language.split("-")[0].lower() not in {"en", "zh"} and set(self.labels) != set(EN):
+            raise ValueError("Provide every report label in the conversation language")
+        if any(not text.strip() for text in self.labels.values()):
+            raise ValueError("Report labels cannot be empty")
+        return self
+
+
 class Plan(Model):
     """Executable plan. Dynamic values use ${vars.name}, ${secrets.binding}, ${run.id}.
 
@@ -504,6 +539,7 @@ class Plan(Model):
 
     schemaVersion: Literal["1"] = "1"
     name: str
+    report: ReportPresentation = Field(default_factory=ReportPresentation)
     sourceRefs: list[str] = Field(min_length=1)
     businessUnderstanding: BusinessUnderstanding
     coverage: Coverage

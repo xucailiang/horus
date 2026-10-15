@@ -1,6 +1,6 @@
 ---
 name: horus
-description: Test HTTP APIs through horus MCP in Codex or Claude Code. Import OpenAPI/Swagger links, generate a business-aware plan, ask the user to reply “我确定”, then execute and deliver the report.
+description: Test HTTP APIs through horus MCP in Codex or Claude Code. Understand the business, preview a plan directly in chat, save it only after human confirmation, then execute and deliver an interactive HTML report in the conversation language.
 ---
 
 The host Agent understands and plans; horus executes, cleans up, and reports facts.
@@ -13,7 +13,7 @@ implemented features and gaps. MCP configuration and Skill installation are sepa
   do not rely on a shared current project or directory.
 - Read existing plans with `horus_get_plan` and follow `nextOffset` until complete.
   Use `horus_get_artifact` for review/report artifacts. Reading a plan does not
-  replace preparing and displaying its fixed review bundle.
+  authorize a new test. For new tests, preview the draft in chat before saving it.
 - Import the supplied OpenAPI/Swagger definition or common Swagger UI URL with
   `horus_import_api`. Read the catalog and numbered evidence through `horus_get_context`.
   If several definitions are found, select the intended one or ask the user.
@@ -35,7 +35,21 @@ implemented features and gaps. MCP configuration and Skill installation are sepa
 
 ## Generate and validate
 
-Read `horus_get_plan_schema`, generate your own plan, then save and validate it.
+Read `horus_get_plan_schema` and generate your own draft in memory. Do not call
+`horus_save_plan`, write plan files, or create a test-version folder before the user
+confirms. Use `horus_preview_plan` to validate the draft without saving it.
+
+Set `plan.report.language` from the **current Codex or Claude Code conversation**,
+not the OS locale, API documentation language, or an old report. For example, use
+`zh-CN` for a Chinese conversation and `en` for English. Write the plan name,
+business understanding, case/step `title`, and assertion `description` naturally in
+that language. English and Chinese UI labels are built in. For another language,
+translate every `report.labels` entry listed in the schema's `x-labels`; never
+silently fall back to English. These labels are plain text, not HTML or scripts.
+Titles should explain business actions (such as “提交后不允许再次修改”), not repeat
+operation IDs. Assertion descriptions should explain what correct behavior means.
+The report reuses this reviewed wording; do not invent a different business story
+after seeing the result.
 Include business understanding, rules, states, actors, dependencies, evidence,
 coverage, requests, captures, assertions, cleanup, and explicit uncovered behavior.
 Distinguish requirements, source inferences, assumptions, conflicts, and unknowns.
@@ -102,24 +116,33 @@ Declare VUs, iterations, time limits, and thresholds. Functional parallelism is 
 load-test evidence. Fix validation errors without silently dropping required checks.
 Do not change expected results merely to make observed backend behavior pass.
 
-## Display and confirm
+## Display and confirm in the conversation
 
-1. Call `horus_prepare_review`, then read the entire artifact, including all pages.
-2. Show the target and business understanding, actual plan/version and scope,
-   cases and assertions, data preparation, writes, cleanup order, fixed load and
-   request budget, assumptions, unknowns, and gaps. Include `planRef` and
-   `reviewBundleRef`. If monitoring is enabled, show its target, read-only commands,
-   interval, maximum duration, baseline, and concurrency rationale.
-3. Ask clearly: **如果确认以上测试计划，请回复“我确定”；需要调整请直接说明。**
-4. Wait for the user's actual **“我确定”** approving that displayed version. Apply
-   requested changes as a new plan and show it again before asking for confirmation.
-5. Only then call `horus_record_review_decision` with the current version and scope,
-   `source=conversation`, and the real confirmation reference or necessary excerpt.
+1. Call `horus_preview_plan(projectRef, plan, configRef, environment)`. It validates
+   and returns readable `content` plus a `previewRef`, without saving the plan.
+2. **Reply directly in the conversation with the readable test plan. Do not put the
+   plan or its confirmation into Ask / request_user_input / multiple-choice tool
+   cards.** Do not send only a file link, raw JSON, hashes, or a long checklist of
+   tool parameters. Explain the business goal, main call chain and expected results,
+   then data changes and cleanup, fixed concurrency/request/time limits, and gaps.
+   Include a small flow diagram when it makes the logic clearer. Keep the wording
+   readable; the user should be able to review it in the chat itself.
+3. End that reply with a short confirmation sentence in the conversation language,
+   such as “确认这份计划后，我再保存并执行；需要调整请直接说。” Then wait.
+   The preview is still a draft; do not save or execute it while waiting.
+4. After the user's actual confirmation, call `horus_confirm_plan` with the
+   **unchanged** plan, config/environment, `previewRef`, and the real confirmation
+   message reference or necessary excerpt. This saves the plan and records its
+   approval together. Do not ask for the same approval again through another tool.
+5. A changed draft, target, load or scope needs a new preview and
+   confirmation in chat. A `preview_mismatch` means the supplied draft changed;
+   never substitute the new fingerprint and reuse the old confirmation.
 
-A general intent to test, an instruction to develop horus, a quotation of “我确定”,
-or approval of a previous version is not approval of an undisplayed plan. Never
-invent confirmation or use a `test-only` decision as human acceptance. Host tool
-permissions still apply. Plan, target, or scope changes need another review.
+A general intent to test, an instruction to develop horus, a quoted confirmation,
+or approval of another plan is not approval of this draft. Never invent human
+confirmation or treat an automated regression decision as human acceptance.
+The low-level save/prepare/record tools remain for existing saved plans and CLI
+replay; they are not the normal way to submit a new test plan to the user.
 
 ## Execute and report
 
@@ -128,9 +151,32 @@ permissions still apply. Plan, target, or scope changes need another review.
 - Call bounded `horus_wait_run` automatically until completion, then read the report.
   A wait timeout/cancellation does not stop the Worker; use `horus_cancel_run` to stop
   testing. After disconnecting, restore the project/run and observe the existing run.
-- Explain actual coverage, failures, performance metrics, inconclusive results, and
-  cleanup residue. A test failure is a valid business result, not a broken MCP call
-  to retry blindly. Include authorized resource observations and their limitations.
+- **One execution is one test version, with one directory.** Use the returned
+  `testDirectory` (`projects/<projectRef>/.horus/runs/<runId>/`). Each new execution,
+  including a replay or cleanup recovery, gets its own directory. A retry of the
+  same start request returns the existing version. Never merge or overwrite an
+  earlier run's plan/report. The directory contains `plan.md` (the confirmed text),
+  `plan.json` (the executable snapshot), `config.json`, `review.json`, `report.html`,
+  `report.json`, `report.md`, and `junit.xml`, along with execution evidence.
+- Deliver **`report.html` as the main report**, using `reportPath` to open/link it
+  with the host's file/browser tools. It works offline. For a client without access
+  to that path, retrieve `htmlArtifactRef` through `horus_get_artifact` (all pages)
+  and save the exact HTML locally. It remains readable on its own; copying the
+  server's whole test directory also makes the sibling plan/evidence links work.
+  Never paste the HTML source into chat as the report.
+- The HTML must show the reviewed business understanding and a **visual call-flow
+  diagram from the approved cases** before the test data. Include branches,
+  bounded waiting and cleanup. Planned steps remain visible even when not run;
+  show actual outcomes separately. Diagram nodes link to the corresponding data.
+  Do not replace the business diagram with only a metric chart or prose summary.
+- Explain results in the same conversation language, in plain terms: what was
+  tested, what was expected, what happened, what failed, and what remains unknown.
+  Define performance numbers in everyday language (e.g. “95% 的请求在 80 ms 内完成”).
+  Keep IDs, raw assertions and request/response details in expandable areas.
+  Use the report's filters, search and expandable details to make the data easy to
+  inspect. Include cleanup residue, untested behavior and authorized machine
+  observations. Never count an unselected path or unrun action as passed.
+  A failed test is a business result, not a broken MCP call to retry blindly.
 - If a finished run needs cleanup recovery, call `horus_cleanup_run` with the original
   run ID and a stable request ID, then wait and read its report. It uses the existing
   approval, recoverable nonsecret IDs, and approved cleanup. Required authentication

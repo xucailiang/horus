@@ -16,14 +16,20 @@ from horus.core.store import HorusError
 
 INSTRUCTIONS = """horus tests HTTP APIs with human-reviewed, immutable plans.
 Call horus_get_capabilities, open a project, stage config, import an OpenAPI/Swagger URL,
-then generate and save your own business-aware plan using horus_get_plan_schema.
+then generate your own business-aware plan using horus_get_plan_schema.
+Set plan.report.language and all human-facing text to the current conversation language.
+Call horus_preview_plan to validate without saving. Present its readable content DIRECTLY
+in chat, never in an Ask/question tool card. Wait for a real human confirmation, then
+call horus_confirm_plan with the SAME draft, previewRef and the actual confirmation.
+Each run saves plan.md, plan.json and report.html in the returned testDirectory.
+Open reportPath for the user: interactive business logic comes before per-test data.
 Use ${vars.name}, ${secrets.binding}, ${run.id}; double-brace templates are unsupported.
 Read optional project code using your host's existing tools. Put relevant source findings
 or user chat material in plan.supportingContext; cite these as context:<id>. No repository
 cloning or special source channel is required from horus.
-Prepare and read the review artifact. Show its exact version, target, writes, cleanup,
-load budget and unknowns to the user. Only record an explicit human decision on THAT
-version. A general test request is not approval. Never submit credential values.
+The legacy save/prepare/record review tools remain for saved plans and CLI replay.
+Only record an explicit human decision on the exact displayed version.
+A general test request is not approval. Never submit credential values.
 Use explicit projectRef throughout. The installed horus skill adds workflow guidance;
 MCP works without the skill. Supported capabilities and remaining gaps are explicit.
 Read a saved plan with horus_get_plan; horus_get_artifact accepts only artifact references.
@@ -127,6 +133,8 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
                     "performanceCasesExclusive": True,
                 },
                 "engines": engines,
+                "reports": ["offline-html", "markdown", "json", "junit"],
+                "planPreviewBeforeSave": True,
                 "executionReady": all(e["status"] == "ready" for e in engines.values()),
                 "gaps": [
                     "k6 regex assertions do not support Unicode property escapes",
@@ -193,16 +201,62 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
             projectRef, lambda: service.get_context(projectRef, sourceRef, offset, limit)
         )
 
+    @server.tool(annotations={"readOnlyHint": True})
+    async def horus_preview_plan(
+        projectRef: str, plan: Plan, configRef: str, environment: str = "test"
+    ) -> Result:
+        """Validate without saving. Show content directly in chat, not an Ask tool card.
+
+        Set report.language, case/step titles and assertion descriptions in the conversation
+        language. Wait for human confirmation before calling horus_confirm_plan.
+        """
+        return await invoke(
+            projectRef,
+            lambda: service.preview_plan(
+                projectRef, plan.model_dump(mode="json"), configRef, environment
+            ),
+        )
+
+    @server.tool()
+    async def horus_confirm_plan(
+        projectRef: str,
+        plan: Plan,
+        configRef: str,
+        previewRef: str,
+        confirmation: str,
+        environment: str = "test",
+    ) -> Result:
+        """After actual human confirmation, save and approve the unchanged displayed draft.
+
+        Pass its previewRef and the real human message reference/excerpt. Do not invent a
+        confirmation or change the plan after it was confirmed. Changed drafts need a new
+        preview and confirmation in chat. This call never sends target requests.
+        """
+        return await invoke(
+            projectRef,
+            lambda: service.confirm_plan(
+                projectRef,
+                plan.model_dump(mode="json"),
+                configRef,
+                environment,
+                previewRef,
+                confirmation,
+            ),
+        )
+
     @server.tool()
     async def horus_save_plan(projectRef: str, plan: Plan) -> Result:
-        """Save and validate your generated plan. Saving never approves it."""
+        """Low-level saved-plan/replay API. For new tests use preview then confirm instead."""
         return await invoke(
             projectRef, lambda: service.save_plan(projectRef, plan.model_dump(mode="json"))
         )
 
     @server.tool(annotations={"readOnlyHint": True})
     async def horus_get_plan(
-        projectRef: str, planRef: str, offset: int = 0, limit: int = 200,
+        projectRef: str,
+        planRef: str,
+        offset: int = 0,
+        limit: int = 200,
     ) -> Result:
         """Read saved plan JSON pages after reconnecting; this does not present or approve it.
 
@@ -226,7 +280,7 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
     async def horus_prepare_review(
         projectRef: str, planRef: str, configRef: str, environment: str = "test"
     ) -> Result:
-        """Render a fixed review bundle; read and show it before requesting human confirmation."""
+        """Legacy saved-plan review. Use preview/confirm for new drafts approved in chat."""
         return await invoke(
             projectRef, lambda: service.prepare_review(projectRef, planRef, configRef, environment)
         )
@@ -298,7 +352,7 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
             status=payload["status"],
             summary=payload.get("verdict", payload["status"]),
             payload=payload,
-            refs={"artifactRef": payload["artifactRef"]} if "artifactRef" in payload else {},
+            refs={k: payload[k] for k in ("artifactRef", "htmlArtifactRef") if k in payload},
         )
 
     @server.tool()
