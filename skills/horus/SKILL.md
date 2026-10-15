@@ -11,6 +11,9 @@ implemented features and gaps. MCP configuration and Skill installation are sepa
 
 - Open or restore a project. Keep an explicit `projectRef` in every business call;
   do not rely on a shared current project or directory.
+- Read existing plans with `horus_get_plan` and follow `nextOffset` until complete.
+  Use `horus_get_artifact` for review/report artifacts. Reading a plan does not
+  replace preparing and displaying its fixed review bundle.
 - Import the supplied OpenAPI/Swagger definition or common Swagger UI URL with
   `horus_import_api`. Read the catalog and numbered evidence through `horus_get_context`.
   If several definitions are found, select the intended one or ask the user.

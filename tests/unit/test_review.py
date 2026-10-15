@@ -77,6 +77,51 @@ def project(tmp_path):
     return service, project_ref, plan, config
 
 
+@pytest.mark.parametrize("separator", ["\u2028", "\u2029", "\u0085"])
+def test_saved_plan_pages_restore_exact_content_without_presenting_or_approving_review(
+    project, separator,
+):
+    service, project_ref, plan, config = project
+    plan["businessUnderstanding"]["summary"] = "before" + separator + "after"
+    plan_ref = service.save_plan(project_ref, plan)["planRef"]
+    config_ref = service.stage_config(project_ref, config)["configRef"]
+    bundle = service.prepare_review(project_ref, plan_ref, config_ref, "test")
+    content = []
+    offset = 0
+    while offset is not None:
+        page = service.get_plan(project_ref, plan_ref, offset, 7)
+        assert page["planRef"] == plan_ref and page["offset"] == offset
+        content.append(page["content"])
+        offset = page["nextOffset"]
+    assert json.loads("\n".join(content)) == service.project(project_ref).get("plans", plan_ref)
+    with pytest.raises(HorusError, match="review_not_presented"):
+        service.record_decision(project_ref, bundle["reviewBundleRef"], plan_ref,
+                                bundle["scopeHash"], "approved", "test-only", "regression")
+    review = []
+    offset = 0
+    while offset is not None:
+        page = service.get_artifact(project_ref, bundle["artifactRef"], offset, 7)
+        review.append(page["content"])
+        offset = page["nextOffset"]
+    assert "before" + separator + "after" in "\n".join(review)
+    assert "\n".join(review) == service.project(project_ref).get(
+        "artifacts", bundle["artifactRef"],
+    )["content"]
+    with pytest.raises(HorusError, match="invalid_page"):
+        service.get_plan(project_ref, plan_ref, -1)
+
+
+def test_saved_plan_read_enforces_project_identity_and_content_integrity(project):
+    service, project_ref, plan, _ = project
+    plan_ref = service.save_plan(project_ref, plan)["planRef"]
+    other = service.open_project("other", create_if_missing=True)["projectRef"]
+    with pytest.raises(HorusError, match="asset_unavailable"):
+        service.get_plan(other, plan_ref)
+    service.project(project_ref).path("plans", plan_ref).write_text('{"tampered":true}')
+    with pytest.raises(HorusError, match="integrity_error"):
+        service.get_plan(project_ref, plan_ref)
+
+
 def test_save_and_validation_do_not_approve(project):
     service, project_ref, plan, config = project
     plan_ref = service.save_plan(project_ref, plan)["planRef"]

@@ -486,6 +486,7 @@ CLI approve 完整展示材料后，等待用户输入“我确定”。日常 A
 | horus_register_source | kind=openapi/markdown、uri | 本地允许根目录中的文档快照 |
 | horus_get_context | sourceRef、可选 operationId/path、offset、limit | 准备状态/摘要；就绪后接口/说明/源码片段与依据 |
 | horus_save_plan | 含 businessUnderstanding/coverage 的 plan、parentPlanRef、changeReason | planRef、校验及差异；不会批准 |
+| horus_get_plan | planRef、offset、limit<=200 | 项目内固定计划的 JSON 分页；校验内容哈希，读取不代表展示审核包或批准 |
 | horus_validate_plan | planRef | 结构/引用问题、覆盖缺口、凭据变量名称、执行规模 |
 | horus_prepare_review | planRef、configRef、environment | reviewBundleRef、材料 artifactRef、scopeHash、awaiting_review |
 | horus_record_review_decision | reviewBundleRef、planRef、scopeHash、决定、来源、用户确认引用/必要摘录 | 已记录的人工决定、reviewRef 与 local_recorded 来源；不能代表 Agent 自行批准 |

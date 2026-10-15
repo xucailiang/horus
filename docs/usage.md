@@ -85,6 +85,10 @@ the confirmation phrase, does not authorize an undisplayed plan.
 After the real decision is recorded, it starts once with a stable request ID,
 waits in bounded calls, and retrieves the automatic report. Missing responses do
 not justify starting a second run. Reports remain available after reconnection.
+After restoring a project, read a saved `planRef` with `horus_get_plan`, following
+its pages to `nextOffset: null`. Review and report references use `horus_get_artifact`.
+Reading plan JSON does not replace showing the fixed review bundle or recording
+the user's decision.
 The report includes the reviewed business understanding, evidence references,
 planned coverage, and the checks actually evaluated. It keeps untested behavior
 visible. Failure requests, responses, and bounded load samples are readable through

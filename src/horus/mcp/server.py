@@ -26,6 +26,7 @@ load budget and unknowns to the user. Only record an explicit human decision on 
 version. A general test request is not approval. Never submit credential values.
 Use explicit projectRef throughout. The installed horus skill adds workflow guidance;
 MCP works without the skill. Supported capabilities and remaining gaps are explicit.
+Read a saved plan with horus_get_plan; horus_get_artifact accepts only artifact references.
 Once execution is available, use a stable requestId, bounded waits and report retrieval;
 do not restart writes after losing a response or timing out a wait.
 """
@@ -104,7 +105,7 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
             payload=payload,
         )
 
-    @server.tool()
+    @server.tool(annotations={"readOnlyHint": True})
     async def horus_get_capabilities() -> Result:
         """Check readiness, supported capabilities and workflow before opening a project."""
         engines = {}
@@ -193,6 +194,15 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
         """Save and validate your generated plan. Saving never approves it."""
         return await invoke(
             projectRef, lambda: service.save_plan(projectRef, plan.model_dump(mode="json"))
+        )
+
+    @server.tool(annotations={"readOnlyHint": True})
+    async def horus_get_plan(
+        projectRef: str, planRef: str, offset: int = 0, limit: int = 200,
+    ) -> Result:
+        """Read saved plan JSON pages after reconnecting. This does not present or approve it."""
+        return await invoke(
+            projectRef, lambda: service.get_plan(projectRef, planRef, offset, limit)
         )
 
     @server.tool(annotations={"readOnlyHint": True})

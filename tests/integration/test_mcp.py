@@ -1,3 +1,4 @@
+import json
 import sys
 import threading
 
@@ -28,6 +29,9 @@ async def test_empty_workspace_stdio_discovers_tools_and_preserves_project(tmp_p
         assert "horus_get_capabilities" in tools
         assert "horus_prepare_review" in tools
         assert "horus_cleanup_run" in tools
+        assert "horus_get_plan" in tools
+        assert tools["horus_get_plan"].annotations.read_only_hint is True
+        assert tools["horus_get_capabilities"].annotations.read_only_hint is True
         assert tools["horus_save_plan"].output_schema is not None
         capabilities = (
             await client.call_tool("horus_get_capabilities", {})
@@ -141,6 +145,18 @@ async def test_mcp_plan_review_execution_and_report_survive_client_disconnect(tm
             ).structured_content["payload"]
             assert result["status"] == "completed"
             assert result["verdict"] == "passed"
+            content = []
+            offset = 0
+            while offset is not None:
+                page = (
+                    await client.call_tool("horus_get_plan", {
+                        "projectRef": project, "planRef": saved["planRef"],
+                        "offset": offset, "limit": 200,
+                    })
+                ).structured_content["payload"]
+                content.append(page["content"])
+                offset = page["nextOffset"]
+            assert json.loads("\n".join(content)) == raw
             report = (
                 await client.call_tool(
                     "horus_get_artifact",

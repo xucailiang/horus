@@ -90,6 +90,10 @@ pipeline.
 2. Configure an isolated native host session using [the setup guide](usage.md).
    The helper copies the packaged Skill into local Codex/Claude skill directories.
    Use a clean horus workspace and the host's existing model authentication.
+   When launching a nested CLI, check inherited credential overrides before
+   diagnosing a key as invalid. Keep any correction scoped to that child process.
+   Noninteractive planning should allow only the needed MCP planning tools;
+   approval and execution tools stay unavailable until the actual human decision.
 
 3. Give the Agent only the API definition URL, business requirements, target,
    credential binding names, and limits. Do not provide `tests/support.py` or a

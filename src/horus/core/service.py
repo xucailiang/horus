@@ -299,6 +299,19 @@ class Service:
         ref = store.put("plans", plan.model_dump(mode="json"))
         return {**result, "planRef": ref}
 
+    def get_plan(
+        self, project_ref: str, plan_ref: str, offset: int = 0, limit: int = 200,
+    ) -> dict[str, Any]:
+        if offset < 0 or not 1 <= limit <= 200:
+            raise HorusError("invalid_page")
+        plan = self.project(project_ref).get("plans", plan_ref)
+        lines = json.dumps(plan, ensure_ascii=False, indent=2).split("\n")
+        return {
+            "planRef": plan_ref, "offset": offset,
+            "content": "\n".join(lines[offset:offset + limit]),
+            "nextOffset": offset + limit if offset + limit < len(lines) else None,
+        }
+
     def prepare_review(
         self, project_ref: str, plan_ref: str, config_ref: str, environment: str
     ) -> dict[str, Any]:
@@ -344,7 +357,7 @@ class Service:
         asset = store.get("artifacts", artifact_ref)
         if offset < 0 or not 1 <= limit <= 200:
             raise HorusError("invalid_page")
-        lines = asset["content"].splitlines()
+        lines = asset["content"].split("\n")
         if asset["kind"] == "review":
             atomic_write(store.root / "presented" / f"{artifact_ref}.json", {"readAt": time.time()})
         return {
