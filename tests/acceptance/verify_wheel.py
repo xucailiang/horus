@@ -12,10 +12,10 @@ from horus.adapters.process import engine_path
 from horus.core.bundles import export_review
 from horus.core.service import Service
 from horus.core.store import atomic_write
+from tests.async_plan import reviewed_async_plan
 from tests.fixtures.reference_api import ReferenceServer
 from tests.fixtures.workflow_api import WorkflowServer
 from tests.support import FIXTURES, reviewed_regression_plan
-from tests.workflow_plan import reviewed_workflow_plan
 
 
 def main() -> None:
@@ -85,7 +85,7 @@ assert [check["status"] for check in checks] == ["passed", "failed"]
                     env["HORUS_OWNER_USERNAME"]: env["HORUS_OWNER_PASSWORD"],
                     env["HORUS_OUTSIDER_USERNAME"]: env["HORUS_OUTSIDER_PASSWORD"],
                 })
-                planner = reviewed_workflow_plan
+                planner = reviewed_async_plan
             else:
                 server = ReferenceServer(
                     0, mode=mode, username=env["HORUS_USERNAME"], password=env["HORUS_PASSWORD"]

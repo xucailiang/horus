@@ -54,7 +54,7 @@ async def execute(workspace: Path, project: str, run_id: str) -> None:
                 runner.cancelled = True
                 # Finish bounded HTTP requests so successful writes can be captured for cleanup.
                 # Load processes and preflight can stop immediately.
-                if runner.active_load or runner.phase == "queued":
+                if runner.active_load or runner.active_poll or runner.phase == "queued":
                     execution.cancel()
                 return
             await asyncio.sleep(0.1)

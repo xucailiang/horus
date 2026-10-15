@@ -11,7 +11,8 @@ import yaml
 from openapi_spec_validator import validate
 
 from horus.adapters.openapi import load_api
-from horus.core.models import HttpStep, LoadStep, Plan, ProjectConfig
+from horus.core.models import HttpStep, LoadStep, Plan, PollStep, ProjectConfig, VariableOperand
+from horus.core.predicates import comparisons
 from horus.core.store import AssetStore, HorusError, atomic_write, canonical, digest, file_lock
 
 VARIABLE = re.compile(r"(?<!\$)\$\{(vars|secrets|run)\.([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -240,6 +241,7 @@ class Service:
         capture_refs: set[str] = set()
         step_refs: set[str] = set()
         max_requests = 0
+        declared_duration_ms = 0
         for case in plan.cases:
             if case.id in case_ids:
                 raise HorusError("duplicate_case", case.id)
@@ -248,21 +250,31 @@ class Service:
             private: dict[str | None, set[str]] = {}
             private_names: set[str] = set()
             public_names: set[str] = set()
-            for http in [*case.steps, *case.cleanup]:
+            for node in [*case.steps, *case.cleanup]:
+                http = node.requestStep if isinstance(node, PollStep) else node
                 if isinstance(http, HttpStep):
                     for name, capture in http.captures.items():
                         (private_names if capture.private else public_names).add(name)
             if private_names.intersection(public_names):
                 raise HorusError("ambiguous_variable_scope", case.id)
             prior: set[str] = set()
-            for step in [*case.steps, *case.cleanup]:
-                location = f"{case.id}.{step.id}"
-                if step.id in prior or step.operationId not in operations:
+            for node in [*case.steps, *case.cleanup]:
+                step = node.requestStep if isinstance(node, PollStep) else node
+                location = f"{case.id}.{node.id}"
+                if node.id in prior or step.operationId not in operations:
                     raise HorusError("invalid_step", location)
                 step_refs.add(location)
                 if step.identityRef is not None and step.identityRef not in profiles:
                     raise HorusError("unknown_identity", location)
                 visible = known | private.get(step.identityRef, set())
+                if isinstance(node, PollStep):
+                    for condition in comparisons(node.until):
+                        for operand in (condition.left, condition.right):
+                            if isinstance(operand, VariableOperand) and operand.name not in visible:
+                                raise HorusError("missing_variable_source", location)
+                    if config and step.operationId not in config.policy.pollAllow:
+                        raise HorusError("poll_operation_denied", location)
+                    declared_duration_ms += node.timeoutMs
                 request_json = step.request.model_dump_json()
                 if re.search(r"\{\{[A-Za-z_][A-Za-z0-9_]*\}\}", request_json):
                     raise HorusError(
@@ -296,7 +308,7 @@ class Service:
                             )
                             if bindings is not None and name not in bindings:
                                 raise HorusError("missing_secret_binding", f"{location}: {name}")
-                cleanup = step in case.cleanup
+                cleanup = node in case.cleanup
                 if config:
                     allowed = config.policy.cleanupAllow if cleanup else config.policy.runAllow
                     if step.operationId not in allowed:
@@ -319,11 +331,12 @@ class Service:
                         else:
                             known.add(name)
                     capture_refs.update(f"{location}.{name}" for name in step.captures)
-                    max_requests += 1
+                    max_requests += node.maxAttempts if isinstance(node, PollStep) else 1
                 else:
                     if case.kind != "performance":
                         raise HorusError("load_requires_performance_case", location)
                     max_requests += step.loadProfile.iterations
+                    declared_duration_ms += step.loadProfile.maxDurationMs
                     if config:
                         limits = config.policy.limits
                         if (
@@ -333,7 +346,7 @@ class Service:
                             or step.loadProfile.maxDurationMs > limits.maxLoadDurationMs
                         ):
                             raise HorusError("load_budget_exceeded", location)
-                prior.add(step.id)
+                prior.add(node.id)
         understanding = plan.businessUnderstanding
         for claim in [*understanding.flows, *understanding.rules]:
             if not set(claim.operationIds).issubset(operations):
@@ -370,6 +383,8 @@ class Service:
                 raise HorusError("unknown_environment", environment)
             if max_requests > config.policy.limits.maxRequestsPerRun:
                 raise HorusError("request_budget_exceeded")
+            if declared_duration_ms > config.policy.limits.maxRunDurationMs:
+                raise HorusError("run_duration_budget_exceeded")
         return {
             "status": "validated",
             "maxRequests": max_requests,

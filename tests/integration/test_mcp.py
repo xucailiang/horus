@@ -32,6 +32,8 @@ async def test_empty_workspace_stdio_discovers_tools_and_preserves_project(tmp_p
         schema = (await client.call_tool("horus_get_plan_schema", {})).structured_content["payload"]
         assert "identityProfiles" in schema["properties"]
         assert "identityRef" in schema["$defs"]["LoadStep"]["properties"]
+        assert "until" in schema["$defs"]["PollStep"]["properties"]
+        assert "ResponseOperand" in schema["$defs"]
         result = await client.call_tool(
             "horus_open_project",
             {

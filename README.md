@@ -48,6 +48,10 @@ A plan can switch between declared identities to check ownership and access rule
 Each identity keeps its own authentication values; case data such as resource IDs
 can connect their requests.
 
+For asynchronous work, a plan can wait for a result by polling an explicitly
+allowed read operation. The interval, attempt limit, and timeout are fixed in the
+plan, and intermediate responses remain observations until the final checks run.
+
 Once approved, a Worker follows the plan, prepares the data, runs HTTP checks with
 Hurl and basic load tests with k6, then cleans up and produces a report. State and
 variables are isolated between runs. You can read the report in the conversation
@@ -115,10 +119,10 @@ testing, cleanup reports, and base-wheel replay have been verified locally. A
 second test backend exercises ownership checks and load testing across identities.
 
 The first milestone, M1, is still open. The full workflow in both native clients,
-including actual human confirmation, remains to be accepted. Branches, polling,
-parallel functional cases, and the second backend's state and asynchronous
-workflows are also unfinished. Automated fixture approvals do not count as human
-acceptance.
+including actual human confirmation, remains to be accepted. Conditional branches
+and parallel functional cases are also unfinished. The second backend's state and
+asynchronous workflow now have local regressions; its conditional paths still
+need acceptance. Automated fixture approvals do not count as human acceptance.
 
 The Chinese [requirements](docs/PRD-horus.md),
 [technical design](docs/TECHNICAL-DESIGN.md), and

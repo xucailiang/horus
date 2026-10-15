@@ -25,6 +25,11 @@ contracts are independent of fault modes. Tests cover:
   Crash recovery reauthenticates both identities without recreating tickets, revokes
   new sessions, and reports the old lost sessions by identity.
 - A separate fixed 5-VU/100-read scenario with latency and correctness thresholds.
+- A submitted job moves from pending to done through real Hurl polling. The same
+  plan fails when the job stays pending or the service permits editing a submitted
+  ticket. Cancellation stops polling and still deletes jobs/tickets and revokes sessions.
+- Poll input scopes, status guards, attempt/time budgets, final capture export,
+  predicate types/composition, and redaction of intermediate conditions.
 - HTTP 200 with incorrect data, excessive latency, and HTTP failures.
 - Review gates, immutable references, scope mismatch, and cross-project isolation.
 - Idempotent starts, disconnect/reconnect, cancellation during cleanup, and engine
@@ -46,7 +51,8 @@ They are never counted as actual human approval.
 `tests.acceptance.verify_wheel` creates a clean Python 3.12 environment, exports
 hash-locked base dependencies from `uv.lock`, and installs the built wheel without
 MCP extras. It verifies packaged Skill/JavaScript files, imports an existing review
-package, and runs normal, data-error, and two-identity workflow scenarios through the CLI.
+package, and runs normal, data-error, and two-identity asynchronous workflow scenarios
+through the CLI. The workflow includes polling, state checks, and independent load.
 
 The expected exit codes are 0, 1, and 0 respectively. Every run must remove its
 records/tickets and revoke its sessions. No model API, MCP server, or business source
@@ -99,7 +105,7 @@ an SDK-only round trip must be reported as incomplete native acceptance.
 ## Remaining acceptance work
 
 The first deterministic slice is implemented and locally verified. Complete
-two-client native generation and actual human approval, the second backend's state
-and asynchronous workflow, branch/poll behavior, and parallel functional cases before claiming
+two-client native generation and actual human approval, conditional branches in the
+second backend's workflow, and parallel functional cases before claiming
 the full M1 milestone. See [implementation notes](IMPLEMENTATION.md) for current
 evidence and gaps.

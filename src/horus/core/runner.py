@@ -6,10 +6,20 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-from horus.adapters.hurl import MISSING, HurlAdapter, pointer
+from horus.adapters.hurl import MISSING, HurlAdapter, Response, pointer
 from horus.adapters.k6 import K6Adapter
 from horus.adapters.process import check_engine
-from horus.core.models import HttpStep, LoadStep, Plan, ProjectConfig, Request, ResourceMetrics
+from horus.core.models import (
+    HttpStep,
+    LoadStep,
+    Plan,
+    PollStep,
+    ProjectConfig,
+    Request,
+    ResourceMetrics,
+    Step,
+)
+from horus.core.predicates import evaluate
 from horus.core.resources import resource_summary
 from horus.core.service import VARIABLE, Service
 from horus.core.store import HorusError, atomic_write, file_lock
@@ -18,7 +28,7 @@ from horus.core.values import CaseContext, Redactor, resolve
 
 def verdict(cases: list[dict[str, Any]]) -> str:
     steps = [step for case in cases for step in [*case["steps"], *case["cleanup"]]]
-    states = [step["status"] for step in steps]
+    states = [step["status"] for step in steps if step["status"] != "observed"]
     for status, result in [
         ("error", "error"),
         ("failed", "failed"),
@@ -30,6 +40,13 @@ def verdict(cases: list[dict[str, Any]]) -> str:
     if any(step.get("reason") == "missing_cleanup_inputs" for step in steps):
         return "inconclusive"
     return "passed" if states else "inconclusive"
+
+
+def assertion_status(checks: list[dict[str, Any]]) -> str:
+    for status in ("failed", "inconclusive"):
+        if any(check["status"] == status for check in checks):
+            return status
+    return "passed"
 
 
 def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[str, Any]:
@@ -59,6 +76,9 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
     for case in result["cases"]:
         lines.extend([f"## {case['id']}", ""])
         for step in [*case["steps"], *case["cleanup"]]:
+            if step.get("kind") == "poll-attempt":
+                lines.append(f"- {step['id']}: observation {step['attempt']}")
+                continue
             count += 1
             identity = f" ({step['identityRef']})" if step.get("identityRef") is not None else ""
             lines.append(f"- {step['id']}{identity}: {step['status']}")
@@ -73,6 +93,11 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
                 ET.SubElement(node, "skipped", message=step["status"])
             if "metrics" in step:
                 lines.extend(["", "```json", json.dumps(step["metrics"], indent=2), "```", ""])
+            if step.get("kind") == "poll":
+                observations = json.dumps(step["observations"], indent=2)
+                lines.extend(["", f"Polling: {step['attempts']} attempts", "",
+                              "```json", observations, "```", ""])
+                ET.SubElement(node, "system-out").text = observations
             if step["status"] in {"failed", "error"}:
                 details = {
                     "reason": step.get("reason"),
@@ -174,6 +199,7 @@ class Runner:
         self.cancelled = False
         self.phase = "queued"
         self.active_load = False
+        self.active_poll = False
 
     def context(
         self, run_id: str | None = None, *, shared: dict[str, Any] | None = None
@@ -214,6 +240,12 @@ class Runner:
                 {**sample, "body": self.redactor.clean(sample["body"])}
                 for sample in safe["failureSamples"]
             ]
+        if "conditions" in safe:
+            safe["conditions"] = [
+                {**condition, "left": self.redactor.clean(condition["left"]),
+                 "right": self.redactor.clean(condition["right"])}
+                for condition in safe["conditions"]
+            ]
         with (self.root / "events.jsonl").open("a") as stream:
             os.chmod(self.root / "events.jsonl", 0o600)
             stream.write(json.dumps(safe) + "\n")
@@ -229,14 +261,45 @@ class Runner:
     def persist_ledger(self) -> None:
         atomic_write(self.root / "ledger.json", self.safe_ledger())
 
+    def capture_response(
+        self,
+        step: HttpStep,
+        response: Response,
+        context: CaseContext,
+        entry: dict[str, Any],
+        *,
+        commit: bool = True,
+    ) -> None:
+        for name, capture in step.captures.items():
+            if capture.purpose == "resource-cleanup" and not 200 <= response.status < 300:
+                continue
+            if capture.jsonPointer is not None:
+                value = pointer(response.body, capture.jsonPointer)
+            elif capture.header is not None:
+                value = response.headers.get(capture.header.lower(), MISSING)
+            else:
+                value = response.status
+            if value is MISSING:
+                if commit:
+                    raise HorusError("capture_missing", name)
+                continue
+            if capture.secret or capture.private:
+                self.redactor.register(value)
+            if commit:
+                context.capture(step.identityRef, name, capture, value)
+                if not (capture.secret or capture.private):
+                    entry["variables"][name] = value
+
     async def step(
         self,
-        step: HttpStep | LoadStep,
+        step: Step,
         context: CaseContext,
         *,
         case_id: str,
         cleanup: bool = False,
     ) -> dict[str, Any]:
+        if isinstance(step, PollStep):
+            return await self.poll(step, context, case_id=case_id)
         record: dict[str, Any] = {"caseId": case_id, "id": step.id, "status": "error"}
         entry: dict[str, Any] = {
             "caseId": case_id,
@@ -280,23 +343,8 @@ class Runner:
                 entry["state"] = "confirmed"
             else:
                 response = await HurlAdapter().request(operation, self.base_url, request)
-                for name, capture in step.captures.items():
-                    if capture.purpose == "resource-cleanup" and not 200 <= response.status < 300:
-                        continue
-                    if capture.jsonPointer is not None:
-                        value = pointer(response.body, capture.jsonPointer)
-                    elif capture.header is not None:
-                        value = response.headers.get(capture.header.lower(), MISSING)
-                    else:
-                        value = response.status
-                    if value is MISSING:
-                        raise HorusError("capture_missing", name)
-                    context.capture(step.identityRef, name, capture, value)
-                    values["vars"][name] = value
-                    if capture.secret or capture.private:
-                        self.redactor.register(value)
-                    else:
-                        entry["variables"][name] = value
+                self.capture_response(step, response, context, entry)
+                values = context.view(step.identityRef)
                 entry["state"] = "confirmed" if 200 <= response.status < 300 else "unknown"
                 self.persist_ledger()
                 assertions = [
@@ -304,16 +352,9 @@ class Runner:
                     for a in step.assertions
                 ]
                 checks = await response.check(assertions)
-                status = (
-                    "failed"
-                    if any(c["status"] == "failed" for c in checks)
-                    else "inconclusive"
-                    if any(c["status"] == "inconclusive" for c in checks)
-                    else "passed"
-                )
                 record.update(
                     {
-                        "status": status,
+                        "status": assertion_status(checks),
                         "request": request.model_dump(mode="json"),
                         "response": {
                             "status": response.status,
@@ -344,6 +385,88 @@ class Runner:
                 }
             )
         self.persist_ledger()
+        return self.event(record)
+
+    async def poll(
+        self, step: PollStep, context: CaseContext, *, case_id: str
+    ) -> dict[str, Any]:
+        http = step.requestStep
+        record: dict[str, Any] = {
+            "caseId": case_id, "id": step.id, "kind": "poll", "status": "error",
+            "attempts": 0, "observations": [],
+        }
+        if http.identityRef is not None:
+            record["identityRef"] = http.identityRef
+        started = time.monotonic()
+        self.active_poll = True
+        try:
+            values = context.view(http.identityRef)
+            request = Request.model_validate(resolve(http.request.model_dump(mode="json"), values))
+            record["request"] = request.model_dump(mode="json")
+            async with asyncio.timeout(step.timeoutMs / 1000):
+                for attempt in range(1, step.maxAttempts + 1):
+                    if self.cancelled:
+                        record.update(status="inconclusive", reason="poll_cancelled")
+                        break
+                    entry: dict[str, Any] = {
+                        "caseId": case_id, "stepId": step.id, "operationId": http.operationId,
+                        "cleanup": False, "state": "intent", "variables": {}, "attempt": attempt,
+                    }
+                    if http.identityRef is not None:
+                        entry["identityRef"] = http.identityRef
+                    self.ledger.append(entry)
+                    self.persist_ledger()
+                    record["attempts"] = attempt
+                    response = await HurlAdapter().request(
+                        self.operations[http.operationId], self.base_url, request
+                    )
+                    entry["state"] = "confirmed"
+                    self.persist_ledger()
+                    # Protect sensitive observations without publishing provisional captures.
+                    self.capture_response(http, response, context, entry, commit=False)
+                    record["response"] = {
+                        "status": response.status, "headers": response.headers,
+                        "body": response.body, "elapsedMs": response.elapsed_ms,
+                    }
+                    guards = await response.check(
+                        [a for a in http.assertions if a.status is not None]
+                    )
+                    if assertion_status(guards) != "passed":
+                        record.update(status=assertion_status(guards),
+                                      reason="poll_response_rejected", assertions=guards)
+                        break
+                    conditions: list[dict[str, Any]] = []
+                    matched = evaluate(step.until, values["vars"], response, conditions)
+                    record["observations"].append(self.event({
+                        "caseId": case_id, "id": step.id, "kind": "poll-attempt",
+                        "identityRef": http.identityRef, "attempt": attempt, "status": "observed",
+                        "statusCode": response.status, "elapsedMs": response.elapsed_ms,
+                        "matched": matched, "conditions": conditions,
+                    }))
+                    if matched:
+                        self.capture_response(http, response, context, entry)
+                        self.persist_ledger()
+                        values = context.view(http.identityRef)
+                        assertions = [a.model_validate(resolve(a.model_dump(mode="json"), values))
+                                      for a in http.assertions]
+                        checks = await response.check(assertions)
+                        record.update(status=assertion_status(checks), assertions=checks)
+                        break
+                    if attempt == step.maxAttempts:
+                        record.update(status="failed", reason="poll_attempts_exhausted")
+                        break
+                    await asyncio.sleep(step.intervalMs / 1000)
+        except TimeoutError:
+            record.update(status="failed", reason="poll_timeout")
+        except asyncio.CancelledError:
+            self.event({**record, "status": "inconclusive", "reason": "poll_cancelled"})
+            raise
+        except (HorusError, ValueError, OSError) as exc:
+            record.update(status="error", reason=exc.code if isinstance(exc, HorusError)
+                          else type(exc).__name__)
+        finally:
+            self.active_poll = False
+        record["pollElapsedMs"] = (time.monotonic() - started) * 1000
         return self.event(record)
 
     async def execute(self) -> dict[str, Any]:
@@ -490,8 +613,9 @@ class Runner:
             private_names = {
                 name
                 for step in [*case.steps, *case.cleanup]
-                if isinstance(step, HttpStep)
-                for name, capture in step.captures.items()
+                for http in [step.requestStep if isinstance(step, PollStep) else step]
+                if isinstance(http, HttpStep)
+                for name, capture in http.captures.items()
                 if capture.private
             }
 

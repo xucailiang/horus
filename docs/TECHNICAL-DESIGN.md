@@ -236,6 +236,8 @@ BranchStep 仅按已存在变量选择一个预先审核的分支，未选分支
 
 PollStep 的 requestStep 必须同时在 runAllow 和 pollAllow 内；轮询只读性不能仅按 GET 判断。中间响应作为观测，until 满足后执行最终数据断言并导出声明变量；网络/协议/断言错误按计划策略记录，不能把错误统一当成“继续等待”。达到次数或时间上限即失败。分支按最坏路径、轮询按最大次数，加上鉴权/清理计算请求与耗时预算；不提供无限循环或运行时 Agent 生成新步骤。
 
+当前轮询契约：requestStep 是 role=exercise 的 HttpStep，identityRef 放在其中；至少一条非推断的状态断言作为每次响应守卫，其他断言仅在 until 满足后执行。条件使用 kind=compare/all/any/not；比较的左右操作数为 kind=literal/variable/response，分别读取原样 JSON、先前捕获变量和当前响应的 JSON Pointer/header/status。字面值不插值，所有条件输入都会检查；缺字段须显式使用 exists，否则报错。条件树最多 64 个节点、8 层；intervalMs 为 1–10000，maxAttempts 为 1–1000，timeoutMs 为 1–60000。超时包含请求、间隔和最终检查，取消可中断只读轮询后进入 finally。覆盖与账本使用外层 poll.id；中间观测不计为通过，最终检查失败仍保留可用于清理的捕获。
+
 首版 LoadStep 支持状态码、header、JSON Pointer 的上述标量/数量检查；功能响应 JSON Schema 由核心验证器执行。LoadStep 请求尚未支持的断言必须在校验阶段报错，不能静默遗漏 JSON Schema 或其他检查。
 
 动态值采用 ${vars.recordId}、${run.id}、${secrets.password}。完整占位符保留原值类型，嵌入文本时转字符串；占位符前再加一个美元符号表示字面量。仅做字段查找，不执行 JS；缺失变量会阻塞依赖步骤。

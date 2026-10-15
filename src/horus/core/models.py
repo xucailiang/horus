@@ -271,7 +271,91 @@ class LoadStep(Model):
         return self
 
 
-Step = HttpStep | LoadStep
+class LiteralOperand(Model):
+    kind: Literal["literal"]
+    value: JsonValue
+
+
+class VariableOperand(Model):
+    kind: Literal["variable"]
+    name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+class ResponseOperand(Model):
+    kind: Literal["response"]
+    jsonPointer: str | None = None
+    header: str | None = None
+    status: bool = False
+
+    @model_validator(mode="after")
+    def one_source(self) -> Self:
+        if sum([self.jsonPointer is not None, self.header is not None, self.status]) != 1:
+            raise ValueError("Response operand requires exactly one source")
+        return self
+
+
+Operand = Annotated[LiteralOperand | VariableOperand | ResponseOperand, Field(discriminator="kind")]
+
+
+class Comparison(Model):
+    kind: Literal["compare"]
+    left: Operand
+    operator: Literal["eq", "ne", "exists", "type", "length", "gte", "lte"]
+    right: Operand
+    evidenceRefs: list[str] = Field(min_length=1)
+
+
+class PredicateGroup(Model):
+    kind: Literal["all", "any"]
+    predicates: list["Predicate"] = Field(min_length=1, max_length=20)
+
+
+class PredicateNot(Model):
+    kind: Literal["not"]
+    predicate: "Predicate"
+
+
+Predicate = Annotated[Comparison | PredicateGroup | PredicateNot, Field(discriminator="kind")]
+
+
+class PollStep(Model):
+    """Observe an explicitly allowed read operation, then capture and assert its final response.
+
+    Status assertions guard every attempt; other assertions run only once `until` is true.
+    Coverage and ledger references use the outer poll id, not requestStep.id.
+    """
+
+    kind: Literal["poll"]
+    id: str
+    requestStep: HttpStep
+    until: Predicate
+    intervalMs: int = Field(ge=1, le=10000)
+    maxAttempts: int = Field(ge=1, le=1000)
+    timeoutMs: int = Field(ge=1, le=60000)
+
+    @model_validator(mode="after")
+    def bounded_observation(self) -> Self:
+        if not any(a.status is not None and not a.tentative for a in self.requestStep.assertions):
+            raise ValueError("Polling requires an explicit, non-tentative status assertion")
+        if self.requestStep.role != "exercise":
+            raise ValueError(
+                "A polling request observes progress; it cannot authenticate or prepare"
+            )
+        pending: list[tuple[Predicate, int]] = [(self.until, 1)]
+        count = 0
+        while pending:
+            predicate, depth = pending.pop()
+            count += 1
+            if count > 64 or depth > 8:
+                raise ValueError("Predicate is limited to 64 nodes and depth 8")
+            if isinstance(predicate, PredicateGroup):
+                pending.extend((child, depth + 1) for child in predicate.predicates)
+            elif isinstance(predicate, PredicateNot):
+                pending.append((predicate.predicate, depth + 1))
+        return self
+
+
+Step = HttpStep | LoadStep | PollStep
 
 
 class Case(Model):

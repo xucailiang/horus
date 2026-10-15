@@ -121,6 +121,61 @@ before review. Changes to profiles or identity selections require another review
 Reports identify the selected identity for each step. Cleanup and recovery use
 the same selections; unrecoverable old sessions are reported with their identities.
 
+## Wait for asynchronous results
+
+Use a poll step when an operation returns a job whose result arrives later.
+Declare the observation operation in both `runAllow` and `pollAllow`. The latter
+is an explicit statement that it is read-only and safe to repeat; HTTP method
+alone cannot establish that. The reviewed limits cover every possible attempt.
+
+This partial plan waits for a job already created by an earlier step:
+
+```yaml
+kind: poll
+id: completion
+requestStep:
+  id: observe-job
+  operationId: getJob
+  identityRef: owner
+  request:
+    pathParams: {id: "${vars.jobId}"}
+    headers: {Authorization: "Bearer ${vars.accessToken}"}
+  captures:
+    completedState: {jsonPointer: /state, secret: false, purpose: case-data}
+  assertions:
+    - {id: status, status: 200, evidenceRefs: ["<sourceRef>#L12"]}
+    - {id: state, jsonPointer: /state, expected: done, evidenceRefs: ["<sourceRef>#L12"]}
+until:
+  kind: compare
+  left: {kind: response, jsonPointer: /state}
+  operator: eq
+  right: {kind: literal, value: done}
+  evidenceRefs: ["<sourceRef>#L12"]
+intervalMs: 100
+maxAttempts: 20
+timeoutMs: 5000
+```
+
+Status assertions check every response. A rejected status or transport error ends
+the poll immediately. Other assertions run after `until` becomes true, and only
+that response exports captures. A final assertion failure still preserves captures
+needed for cleanup. Coverage and dependencies use the outer id, such as
+`caseId.completion.state`, rather than `observe-job`.
+
+Predicates compare typed literals, prior case variables (`kind: variable`, `name`),
+and current response JSON/header/status fields. They support `eq`, `ne`, `exists`,
+`type`, `length`, `gte`, and `lte`, combined with `all`, `any`, or `not`. Literals
+are exact values; they do not interpolate `${...}`. All inputs are evaluated.
+Missing fields are errors unless explicitly checked with `exists`; invalid numeric
+or length operands are errors too. A predicate cannot consume its poll's final
+captures. Trees are limited to 64 nodes and depth 8.
+
+The poll's timeout includes requests, intervals, and final checks. Exhausting either
+the time or attempt limit fails the step, then enters normal cleanup. Declared
+poll and load durations must fit the run time limit; other HTTP actions also share
+that limit, while finally cleanup has its own budget. Reports retain the attempts
+and observed conditions without counting pending responses as passing tests.
+
 ## CLI replay
 
 The CLI uses the same core and review gate:

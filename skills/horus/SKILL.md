@@ -58,6 +58,17 @@ marked `secret=true`; that marker redacts and omits its ledger value. Do not reu
 another account's credential capture. Show these selections during review.
 
 Negative cases need explicit error expectations. HTTP 200 alone is not a data pass.
+Use `kind=poll` for asynchronous progress, with `requestStep` (an HTTP exercise step),
+`until`, `intervalMs`, `maxAttempts`, and `timeoutMs`. The operation must be explicitly
+declared read-only in `pollAllow` and also allowed in `runAllow`; method alone is not
+proof. Put `identityRef` inside `requestStep`. Its status assertions guard every
+response; other assertions and captures apply only after `until` matches. Do not
+use a poll's own final captures as inputs to `until`. Coverage uses the outer poll id.
+Read the exact predicate schema: `compare` has typed `literal`, `variable`, or
+`response` operands; combine with `all` / `any` / `not`. Literals do not interpolate.
+All inputs are evaluated; use `exists` explicitly for optional response fields.
+Timeout, exhausted attempts, invalid responses, or engine errors end the poll and
+enter cleanup. Intermediate observations are evidence, not passing tests.
 For string formats, `operator=regex` takes a plain ECMAScript Unicode pattern in
 `expected` (no `/` delimiters, at most 512 characters). It searches a JSON Pointer
 or header string; use `^` and `$` for full formats. Missing/nonstring values fail.

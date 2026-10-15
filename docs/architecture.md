@@ -64,6 +64,10 @@ content hashes do not independently authenticate a human reviewer.
 The same request returns the same run; conflicting parameters are rejected.
 One active run holds a project lease; separate projects may run concurrently.
 Functional cases currently run in sequence. Load uses fixed k6 VUs and iterations.
+Polling repeats only explicitly declared read operations within fixed attempt and
+time limits. Typed predicates inspect prior variables and the current response;
+status guards apply to every attempt, final assertions and captures to completion.
+Intermediate conditions are recorded as observations rather than passing checks.
 
 Closing an MCP connection does not stop a Worker. Ordinary cancellation stops new
 business actions and terminates active load. An in-flight bounded HTTP request can
@@ -118,8 +122,8 @@ verdict. horus does not implement an SSH service or remote monitoring agent.
 
 ## Current limits
 
-HTTP/load steps and identity profiles are implemented. Conditional branches,
-bounded polling and parallel functional cases remain development work. Common Swagger UI discovery
+HTTP/load/poll steps and identity profiles are implemented. Conditional branches
+and parallel functional cases remain development work. Common Swagger UI discovery
 patterns are supported; arbitrary dynamic pages and external schema references
 may require a direct, self-contained API definition.
 
