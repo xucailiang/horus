@@ -5,7 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from horus.core.models import ResourceMetrics
-from horus.core.runner import write_report
+from horus.core.reports import write_report
 from horus.core.runs import Runs
 from horus.core.service import Service
 from horus.core.store import HorusError, atomic_write

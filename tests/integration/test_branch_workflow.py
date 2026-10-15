@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from horus.core.runner import recorded_events, result_steps
+from horus.core.reports import recorded_events, result_steps
 from horus.core.runs import Runs
 from horus.core.service import Service
 from horus.core.store import HorusError, atomic_write

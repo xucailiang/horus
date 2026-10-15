@@ -9,7 +9,8 @@ from horus import worker
 from horus.adapters.hurl import HurlAdapter, Response
 from horus.adapters.k6 import K6Adapter
 from horus.core.models import Assertion, Capture, HttpStep
-from horus.core.runner import Runner, verdict
+from horus.core.reports import verdict
+from horus.core.runner import Runner
 from horus.core.runs import Runs
 from horus.core.service import Service
 from horus.core.store import HorusError, atomic_write

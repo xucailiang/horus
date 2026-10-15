@@ -130,7 +130,7 @@ class Runs:
                     except ProcessLookupError:
                         pass
                 if not alive:
-                    from horus.core.runner import interrupted_report
+                    from horus.core.reports import interrupted_report
 
                     return interrupted_report(self.service, project_ref, run_id)
         return state
@@ -191,6 +191,6 @@ class Runs:
             if result.get("resourceMetrics") == data:
                 return self.get(project_ref, run_id)
             result["resourceMetrics"] = data
-            from horus.core.runner import write_report
+            from horus.core.reports import write_report
 
             return write_report(self.service, root, result)

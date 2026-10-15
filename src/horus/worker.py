@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from horus.adapters.process import EXECUTION_LEASE
-from horus.core.runner import Runner, write_report
+from horus.core.reports import write_report
+from horus.core.runner import Runner
 from horus.core.runs import Runs
 from horus.core.service import Service
 from horus.core.store import atomic_write, file_lock

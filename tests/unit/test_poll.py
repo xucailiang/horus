@@ -8,7 +8,7 @@ from pydantic import TypeAdapter, ValidationError
 from horus.adapters.hurl import Response
 from horus.core.models import PollStep, Predicate
 from horus.core.predicates import evaluate
-from horus.core.runner import verdict, write_report
+from horus.core.reports import verdict, write_report
 from horus.core.service import Service
 from horus.core.store import HorusError
 from tests.support import FIXTURES, reviewed_regression_plan

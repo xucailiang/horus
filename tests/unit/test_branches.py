@@ -7,7 +7,8 @@ from pydantic import ValidationError
 
 from horus.adapters.hurl import Response
 from horus.core.models import BranchStep
-from horus.core.runner import Runner, write_report
+from horus.core.reports import write_report
+from horus.core.runner import Runner
 from horus.core.store import HorusError, atomic_write
 from tests.unit.test_execution_safety import prepared_runner
 from tests.unit.test_identities import identity_assets
