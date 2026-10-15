@@ -17,9 +17,9 @@ rules to concrete requests and checks, explains its reasoning, and identifies
 what it still does not know. You review both its understanding of the system and
 how it intends to verify it.
 
-That work remains useful after the conversation ends. The plan keeps the expected
-behavior and its basis together, so you can inspect it, revise it as requirements
-change, and run it again. The report records what happened, what failed, and what
+The saved plan keeps the expected behavior and its basis together, so you can
+inspect it, revise it as requirements change, and run it again. The report records
+what happened, what failed, and what
 was left untested. The Agent can use that evidence to investigate the code and
 help decide what to check next. horus is built to make the context used to develop
 software useful for verifying it, too.
@@ -100,6 +100,15 @@ on your machine, set `HORUS_HURL_BIN` / `HORUS_K6_BIN`.
 Configure MCP and install the Skill separately. Run `uv run horus skill` to find
 the bundled Skill, then follow the [Codex / Claude Code setup guide](docs/usage.md).
 
+In your coding agent, start with a request like:
+
+```text
+Use horus to test <service URL>, with the API definition at <OpenAPI/Swagger URL>.
+Understand the business rules and call dependencies, then propose functional
+and basic concurrency tests, including data preparation and cleanup.
+Show me the plan and load limits first. After I confirm, run it and return the report.
+```
+
 ## Development and verification
 
 Checks run locally; the project has no hosted CI pipeline.
@@ -120,16 +129,18 @@ acceptance with an actual Agent and human approval.
 
 ## Project status
 
-horus is in early development. API import, plan review, HTTP checks, basic load
-testing, cleanup reports, and base-wheel replay have been verified locally. A
-second test backend exercises ownership checks and load testing across identities.
+The first usable version is available from this repository. Codex and Claude Code
+have each generated a plan through MCP, obtained actual human confirmation, and
+completed functional checks, 5-VU/100-read load tests, cleanup, and report retrieval.
+A separately reviewed list/detail follow-up has also passed. Codex has completed
+a second backend's ownership, state, and asynchronous workflow tests using the
+same platform code.
 
-The first milestone, M1, is still open. A sample plan drafted in Claude Code,
-corrected through MCP, and approved by an actual user has completed its HTTP and
-load checks. Functional parallelism and the second backend's state, asynchronous
-workflow, and conditional paths have local regressions. Full acceptance in both
-native clients and a separately reviewed follow-up plan are still pending.
-Automated fixture approvals do not count as human acceptance.
+The current scope is HTTP/REST with JSON. Local regressions cover failures,
+bounded polling, branches, identity isolation, functional parallelism, and
+base-wheel replay without a model. See [current limits](docs/architecture.md#current-limits)
+and the [implementation notes](docs/IMPLEMENTATION.md) for the verified scope.
+Automated fixture approvals are kept separate from actual human acceptance.
 
 The Chinese [requirements](docs/PRD-horus.md),
 [technical design](docs/TECHNICAL-DESIGN.md), and

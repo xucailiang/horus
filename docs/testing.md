@@ -121,10 +121,25 @@ Repeat independently in both clients. Preserve plan/review/run references and
 redacted evidence. A client authentication error, an invalid generated draft, or
 an SDK-only round trip must be reported as incomplete native acceptance.
 
-## Remaining acceptance work
+## Acceptance status
 
-The deterministic execution paths are implemented and locally verified. A sample
-plan has passed after actual human approval, with MCP disconnect/reconnect during
-the run. Native acceptance in both clients and a separately reviewed follow-up
-plan remain open. See [implementation notes](IMPLEMENTATION.md) for the evidence
-and gaps; the MCP round trip does not complete native client acceptance.
+The first usable version's core workflow has been verified. Native Codex and
+Claude Code each generated a reference-API plan through MCP, received actual
+human confirmation of that version, executed functional and 5-VU/100-read tests,
+cleaned up, and read the report. A separately reviewed list/detail follow-up also
+passed. Native Codex completed the second backend's permission, state, branch,
+and asynchronous polling workflow.
+
+The automated suite has 161 passing tests. Ruff, strict mypy, Skill validation,
+builds, and five clean base-wheel scenarios have passed. These checks cover the
+execution paths described above; they do not promise complete coverage of an
+arbitrary service or replace review of the Agent's business understanding.
+
+An additional Claude workflow-API attempt ended without a saved executable plan
+or a run. It is not counted as a pass. The current delivery closes around the
+usable MCP/Skill testing workflow; further client/scenario combinations are
+optional verification. Resource monitoring was declined for this acceptance,
+and no CI pipeline is configured.
+
+See [implementation notes](IMPLEMENTATION.md) for the evidence and
+[current limits](architecture.md#current-limits) for implementation boundaries.

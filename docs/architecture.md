@@ -147,5 +147,16 @@ parallelism are implemented. Common Swagger UI discovery
 patterns are supported; arbitrary dynamic pages and external schema references
 may require a direct, self-contained API definition.
 
+Pre-review API probing has no execution entry point; `probeAllow` is currently
+unused. Business requests run within an approved plan. Approval can be recorded
+through MCP or the CLI, and rejection through MCP. Revocation is checked by the
+core but has no supported command or MCP operation.
+
+Supplemental plans retain `parentPlanRef` and `changeReason`. Review material
+contains the current plan; it does not compute a parent/child diff. Validation
+checks execution and coverage references, but does not yet fully check business
+state resource references, dependency producers/consumers, or unique business IDs.
+`maxReportDurationMs` is present in the configuration but is not currently enforced.
+
 The detailed Chinese design and historical decisions remain available in
 [the technical design](TECHNICAL-DESIGN.md) and [ADRs](decisions/).

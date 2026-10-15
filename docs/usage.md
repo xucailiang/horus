@@ -1,6 +1,6 @@
 # Using horus with a host Agent
 
-Install from this repository while the project is in early development:
+Install the current version from this repository:
 
 ```sh
 git clone https://github.com/xucailiang/horus.git

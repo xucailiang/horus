@@ -2,7 +2,7 @@
 
 当前范围：本阶段不建设 GitHub Actions 等 CI 流水线，使用本地测试、静态检查和打包验证。原设计中的 CI 部分仅作为后续参考。
 
-方案基线 v0.4，2026-10-15。状态：M1 实施中。下文包含已实现能力与后续计划，当前实现和验收证据见 [实施记录](IMPLEMENTATION.md)。
+方案基线 v0.4，2026-10-15。状态：首版核心流程已交付。用户确认按现有 MCP 实操引导、业务与调用链理解、功能及基础并发测试能力收尾，不再追加功能或验收场景。下文保留设计背景，当前实现、验证范围与限制见 [实施记录](IMPLEMENTATION.md)。
 
 依据：[PRD v0.7](PRD-horus.md)、[ADR-0003](decisions/0003-autonomous-workflow-and-python312.md) 与 [ADR-0004](decisions/0004-mcp-primary-workflow.md)。主使用路径及两客户端接入示例见 [Agent + MCP 链路](AGENT-MCP-WORKFLOW.md)。首个正式交付 M1 包含 MCP Server、CLI、Skill、自动接入、业务理解与人工审核、完整功能链路、基础并发压测、自动报告和两个后端的通用性验收，不单独建设 PoC。
 
@@ -46,7 +46,7 @@ FastMCP 4.1.0 的官方打包已提供 fastmcp-slim。horus[mcp] 仅依赖其 se
 - 仓库 .python-version 已固定为 3.12；实施时 pyproject.toml 使用 requires-python = ">=3.12,<3.13"，类型检查与 CI 同样指定 3.12。补丁版本可在 3.12 系列内更新，不自动扩大到其他次版本。
 - 项目环境、解释器选择、依赖安装/锁定、运行及构建均使用 uv；提交 uv.lock，CI 用 --frozen，禁止临场升级依赖。uv 自身在实施时锁定发布版本。
 - CLI/MCP/Worker 复用同一 Python 环境，Worker 使用当前解释器启动。业务 CI 也通过 uv 安装固定 wheel 与带哈希依赖，省去 MCP 可选依赖。
-- 当前没有 pyproject.toml 或 uv.lock，不宣称已初始化可运行工程；这些随 T1 正式实施创建。
+- pyproject.toml、uv.lock 和 .python-version 已提交，当前工程使用 Python 3.12 与冻结依赖运行、测试和构建。
 
 ### 1.3 用户闭环与接入编排
 
@@ -94,9 +94,9 @@ pyproject.toml            wheel、horus 命令入口、mcp 可选依赖
 uv.lock                   锁定依赖
 src/horus/core/           项目、资料、知识、计划、审核、变量、策略、调度、报告
 src/horus/adapters/       Hurl、k6、OpenAPI URL 与文件访问
-src/horus/cli/            Typer 命令与退出状态
+src/horus/cli.py          Typer 命令与退出状态
 src/horus/mcp/            FastMCP 工具注册与标准结果映射
-src/horus/worker/         独立运行、心跳和取消处理
+src/horus/worker.py       独立运行、心跳和取消处理
 skills/horus/             通用 Skill 与两客户端配置参考
 tests/{unit,integration,acceptance}/
 tests/fixtures/reference-api/
@@ -154,7 +154,7 @@ context:<id> 引用。接口定义的依据仍用 sourceRef#Lx。平台不建设
 
 ### 3.3 策略和凭据
 
-project.yaml 明确服务 origin、可探测只读操作、正式执行操作、清理操作、并发上限、迭代/请求预算和超时。凭据只声明环境变量名，运行时解析。
+项目配置快照明确服务 origin、正式执行操作、清理操作、并发上限、迭代/请求预算和超时。凭据只声明环境变量名，运行时解析。probeAllow 为保留字段，当前没有计划前只读探测执行入口。
 
 上述具体配置由 Agent 从资料与用户边界生成草案并集中展示，不把逐接口配置责任转回用户。身份不足、特殊签名不支持、目标不可达等问题在正式执行前集中定位。
 
@@ -360,7 +360,7 @@ thresholds:
 
 校验依次检查：Schema/版本/ID → 业务理解、依据与覆盖映射 → 操作与来源 → 参数及变量依赖 → 断言依据 → 操作、负载、清理和预算 → 引擎与凭据。负例须明确 negative 标记及错误预期，不能用正例参数校验把所有负例拒绝掉。
 
-业务理解不是靠关键字存在就算合格：引用的流程、规则、接口、case、step、capture、assertion 必须真实存在且归属当前快照。未覆盖项必须有原因，未知项要说明影响。程序校验结构和引用，不能宣称证明 LLM 的业务推断正确；语义由人工审核。
+程序检查操作、case、step、capture、assertion 的执行与覆盖引用，以及资料依据。未覆盖项必须有原因，未知项要说明影响。当前业务状态的 resourceId、数据依赖的 producer/consumers 和业务 ID 唯一性尚未完整校验；程序校验也不证明 LLM 的业务推断正确，业务理解仍由人工审核。
 
 推断但未确认的预期保留 tentative 标记，CI 中不算已确认通过。校验不静默修正计划或删除检查；不支持的能力返回具体问题。
 
@@ -368,29 +368,29 @@ thresholds:
 - Step：passed、failed、blocked、skipped、error、inconclusive；清理结果单列。
 - 总体 verdict：passed、failed、error、inconclusive；阻塞/跳过不计入通过。
 - 结果关联 runId、planRef、sourceRefs、环境和引擎版本、实际请求/响应证据、预期/实际值。
-- 结果同时关联 reviewRef、scopeHash、业务流程/规则与用例覆盖；记录实际被测服务版本（可获知时），区别于计划分析时的源码版本。
+- 结果同时关联 reviewRef、scopeHash、业务流程/规则与用例覆盖，并保留引擎版本与请求/响应证据。被测服务若在响应中提供版本，可随证据保留；当前没有自动部署版本识别或契约漂移分类。
 - 性能统一输出：配置/观测并发、完成迭代、请求数、requests/s、延迟 avg/P50/P95/P99/max（ms）、HTTP 错误率、数据检查失败率、阈值和样本数。内部率为 0～1，显示为百分比。
 - 后续通过或清理成功不覆盖先前失败；功能、数据、性能错误同时保留。
 
 ### 4.3 人工审核与执行门槛
 
-保存不等于批准，校验通过不等于批准。审核状态是围绕不可变 planRef 的独立记录：validated → awaiting_review → approved / rejected；新版本不会继承父版本的 approved 状态。原版记录与结果保留，人工可撤销后续运行许可。各状态变化记录操作者、时间和原因。
+保存不等于批准，校验通过不等于批准。审核状态是围绕不可变 planRef 的独立记录：validated → awaiting_review → approved / rejected；新版本不会继承父版本的 approved 状态。原版记录与结果保留。核心会检查撤销标记，但当前没有受支持的撤销操作入口。
 
-审核材料由已保存计划确定性渲染为 review.md + review.json，包含：
+审核材料由已保存计划确定性渲染为可经 MCP 读取的 Markdown 材料和 JSON 审核包，包含：
 
 1. LLM 的业务理解、流程图/顺序、规则、状态和数据依赖，以及资料/源码定位。
 2. 流程与用例、规则与断言的映射，未覆盖、推断、冲突和未知项。
 3. 具体请求链路、数据生成和捕获、写操作、清理动作、失败处理。
 4. 鉴权引用、目标环境、最大请求数、并发/迭代规模、阈值。
-5. 父版本差异、增补原因及触发证据；审批显示完整 planRef，避免审核后内容被替换。
+5. 父版本引用、增补原因及触发证据；审批显示完整 planRef。当前材料展示完整新计划，尚未自动计算父子版本差异。
 
 ReviewGate 在任何正式请求发出前检查：计划哈希一致 → 审核决定有效 → 目标环境与 scopeHash 匹配 → 项目策略仍允许 → 运行参数与预算未改变。MCP start_run 与 CLI run 共用此入口，无审核时返回 review_required，不启动业务请求或负载进程。只读探测沿用独立 probeAllow，不借此执行正式计划中的写操作。
 
 scopeHash 包含项目身份、环境标识及解析后的目标 origin/base path、允许操作和负载/超时预算、相关执行策略。凭据值、运行 UUID、响应提取变量不在审批哈希中，允许凭据轮换和每次生成隔离数据。修改计划内容、目标地址或相关策略需要重新送审；不能通过 CLI 临时覆盖并发或参数绕过审核。单次运行使用固定快照，启动后策略变化不能扩大它的权限；取消仍可生效。
 
-审核一个版本后，允许它在同一审核范围内多次运行，包括 CI。部署了新代码本身不会使回归计划失效：计划引用的是分析时的源码快照，每轮记录当前被测版本，发现资料/契约漂移写入报告。重新分析或更新计划引用的资料则产生新版本，重新审核。人工批准未知项表示接受本次测试范围限制，不自动把源码推断变成需求事实或把 tentative 断言变成已确认通过；人工补充需求须登记为新依据并更新计划。
+审核一个版本后，允许它在同一审核范围内多次运行。部署新代码本身不会使回归计划失效：执行仍使用已保存的资料、上下文和预期，报告保留本轮实际请求与响应。Agent 可据此分析实现变化或契约冲突；当前没有自动部署版本识别或漂移分类。重新分析或更新计划引用的资料会产生新版本，重新审核。人工批准未知项表示接受本次测试范围限制，不自动把源码推断变成需求事实或把 tentative 断言变成已确认通过；人工补充需求须登记为新依据并更新计划。
 
-审核入口并列支持 CLI 与 Agent 对话。先展示 reviewBundleRef 对应的业务摘要、版本、范围、写操作、负载和未知项；用户明确确认该材料后，Agent 可调用 horus_record_review_decision 记录已发生的人工决定，并携带 planRef/scopeHash、决定来源和确认消息引用/必要摘录。此工具用于落盘人工决定，不授权 Agent 自行作出决定。明确版本的对话确认无需再执行 CLI 批准；一般测试意图、模糊确认或旧版批准均不能作为新版依据。CLI 保留直接人工批准、拒绝和撤销入口。业务 CI 只消费已有记录，不产生新批准。
+审核入口支持 CLI 与 Agent 对话。先展示 reviewBundleRef 对应的业务摘要、版本、范围、写操作、负载和未知项；用户明确确认该材料后，Agent 可调用 horus_record_review_decision 记录已发生的人工决定，并携带 planRef/scopeHash、决定来源和确认消息引用/必要摘录。此工具用于落盘人工决定，不授权 Agent 自行作出决定。明确版本的对话确认无需再执行 CLI 批准；一般测试意图、模糊确认或旧版批准均不能作为新版依据。CLI 提供人工批准入口，MCP 可记录批准或拒绝；当前没有撤销命令或工具。离线回放只消费已有记录，不产生新批准。
 
 首版的信任边界是用户控制的本地项目、按 Skill 行事的宿主 Agent 和受信 CI 输入，不是同一操作系统中人与 Agent 的强隔离。对话记录由宿主/Agent 提交，首版只校验版本、范围与记录完整性，不能凭消息引用或姓名独立证明人工身份，来源标记 local_recorded。CI 从受保护分支或受控 artifact 取得审核包，不接受本轮 CI 自动产生的批准文件；文件哈希仅用于一致性。若需抵御恶意同权进程或强制验证身份，需独立审核服务或签名授权，属于后续团队能力。
 
@@ -437,6 +437,8 @@ cleanup 按声明顺序执行，某步失败不阻止其他具备条件的清理
 
 运行使用已审核的总体时限；到期停止新增业务动作，进入独立有界 cleanup，再进入 reporting。测试失败、部分阻塞、引擎异常和用户取消均保留原判定并自动生成 summary.json/report.json/report.md/junit.xml 及报告引用，不要求额外执行 report 命令。文件存储故障须返回可定位的报告写入错误，不能假报报告已生成。
 
+配置中的 maxReportDurationMs 当前尚未强制执行；总体执行和清理时限已生效。
+
 修复清理需要有效鉴权；原 token 不再可用时，仅重新执行计划中显式标记 role=authentication 且被 cleanupAllow 允许的鉴权步骤，不重跑 prepare/exercise。鉴权失败则报告清理阻塞。
 
 MCP start_run 必须带 reviewRef 和 requestId，由审核记录取得固定 configRef，不隐式选取“最近批准”的配置；原子登记该项目的请求、参数摘要、runId 后由独占认领的独立 Worker 执行，完成启动握手再返回。相同 requestId/参数重试返回原 runId，参数不同返回 request_conflict；客户端收不到响应时不能新开一轮写入。CLI 同样通过核心的幂等启动入口。
@@ -469,7 +471,7 @@ CLI approve 完整展示材料后，等待用户输入“我确定”。日常 A
 记录实际对话确认，无需再运行 CLI。run 默认等待，`--no-wait` 返回 runId，
 两者均使用固定审核范围；不允许命令行临时改目标、参数或并发。
 
-资料接入、计划生成和取消目前走 MCP；修复清理共用原审核及账本，doctor 入口仍待实现。
+资料接入、计划生成和取消目前走 MCP；修复清理共用原审核及账本。当前没有 doctor 命令。
 仅安装基础 wheel 即可回放审核包，不需要 FastMCP 或模型客户端。
 
 退出码：0 全部要求检查通过；1 功能/数据/性能阈值或清理失败；2 计划/配置/策略/依赖/引擎错误；3 只有阻塞/待判定、审核缺失/无效，或取消/中断。并存时优先级 2、1、3、0，报告仍保留全部结果。
@@ -479,13 +481,13 @@ CLI approve 完整展示材料后，等待用户输入“我确定”。日常 A
 | 名称 | 输入 | 返回 |
 | --- | --- | --- |
 | horus_get_capabilities | 无 | 版本、资料/执行能力、引擎就绪状态、工作区限制与流程指引 |
-| horus_list_projects | query、cursor、limit | projectRef、摘要及分页 |
+| horus_list_projects | offset、limit | projectRef、摘要及分页 |
 | horus_open_project | 项目名称或 projectRef、createIfMissing | projectRef、持久上下文摘要、已有配置/资料/计划/审核/运行引用 |
-| horus_stage_project_config | 环境/目标、凭据绑定名称、资料声明、边界与预算草案 | configRef、缺口、范围摘要；不会直接启用权限 |
+| horus_stage_project_config | 环境/目标、凭据绑定名称、边界与预算草案 | configRef、draft 状态及配置；不会直接启用权限 |
 | horus_import_api | URL | sourceRef、定义与操作目录；多定义时返回候选 |
 | horus_register_source | kind=openapi/markdown、uri | 本地允许根目录中的文档快照 |
-| horus_get_context | sourceRef、可选 operationId/path、offset、limit | 准备状态/摘要；就绪后接口/说明/源码片段与依据 |
-| horus_save_plan | 含 businessUnderstanding/coverage 的 plan、parentPlanRef、changeReason | planRef、校验及差异；不会批准 |
+| horus_get_context | sourceRef、offset、limit | 文档行、操作目录及依据 |
+| horus_save_plan | 含 businessUnderstanding/coverage 的 plan、parentPlanRef、changeReason | planRef、校验；不会批准或自动计算父版本差异 |
 | horus_get_plan | planRef、offset、limit<=200 | 项目内固定计划的 JSON 分页；校验内容哈希，读取不代表展示审核包或批准 |
 | horus_validate_plan | planRef | 结构/引用问题、覆盖缺口、凭据变量名称、执行规模 |
 | horus_prepare_review | planRef、configRef、environment | reviewBundleRef、材料 artifactRef、scopeHash、awaiting_review |
@@ -554,7 +556,7 @@ Agent 从该后端自身资料生成身份、分支、轮询、状态与关系�
 
 ### 7.2 首条完整交付
 
-1. 真正的 Codex/Claude 经 horus Skill/FastMCP 读取文档与源码，将业务流程、规则、数据依赖、依据和覆盖映射写入计划，包含功能 case 和性能 case。
+1. Codex/Claude 经 horus Skill/FastMCP 读取接口资料及可选的宿主源码结论，将业务流程、规则、数据依赖、依据和覆盖映射写入计划，包含功能 case 和性能 case。
 2. 保存并校验计划，展示审核材料。先证明未审核版本不能正式执行，再由人工审核具体版本与功能/负载范围。
 3. 功能：登录 → 创建 → 查询/数据断言 → finally 删除 → 查询确认 404 → 注销。
 4. 性能：独立登录/创建 → 5 VU、100 次迭代读取及检查 → 汇总阈值 → 独立清理/确认/注销。
@@ -566,6 +568,8 @@ Agent 验收使用干净项目，仅提供被测资料/源码/策略，不向 Ag
 
 ### 7.3 验收矩阵
 
+下表保留工程复测要求。当前已通过范围及未实现项见实施记录；不要求继续穷举客户端与场景组合，才允许使用已交付的核心流程。
+
 | 情况 | 通过要求 |
 | --- | --- |
 | 业务理解与覆盖 | 计划包含来源明确的流程/规则/数据依赖，能定位用例和断言；人工可查看并提出修改 |
@@ -575,7 +579,7 @@ Agent 验收使用干净项目，仅提供被测资料/源码/策略，不向 Ag
 | MCP 连接与发现 | 两客户端真实发现工具和已安装 Skill；未安装 Skill 也能靠 MCP 指引完成基本流程 |
 | 重试与恢复 | 启动响应丢失后同 requestId 只对应一个实际运行；等待超时不重启，正常会话关闭后 Worker 继续，重连恢复相同引用 |
 | 项目隔离 | 多会话经同一服务操作不同项目，配置、批准、变量和报告引用不串用 |
-| 未审核/拒绝/撤销 | MCP/CLI/CI 发正式请求前阻塞，返回原因及退出 3；只读探测仍按原策略处理 |
+| 未审核/拒绝/撤销 | 未审核或无效审核在正式请求前阻塞；撤销目前只有底层标记检查，没有用户操作入口；计划前探测未开放 |
 | 审核后内容或范围变化 | 修改业务理解/断言/参数/负载、目标环境或策略，旧批准不适用；不能静默执行 |
 | 正常 | 功能/压测通过、100 迭代完成、指标存在、资源/token 清理、退出 0 |
 | 200 但数据错 | 功能失败，HTTP 错误率可为 0，但数据检查失败率大于 0；退出 1、清理完成 |
@@ -606,10 +610,10 @@ Agent 验收使用干净项目，仅提供被测资料/源码/策略，不向 Ag
 | T6 k6 适配器 | 基础负载/官方结果/阈值/采样，数据错和延迟检出 | T2、T3、T5 |
 | T7 自动报告和 CLI | 审核材料/人工入口/包导入导出、自动报告和退出码；异常/超时也出结果，无 Agent 重跑 | T5、T6 |
 | T8 MCP | 空工作区启动/项目与配置草案、FastMCP 工具/分页/错误/指引、幂等启动/恢复、人工决定记录/有界等待；client 经进程实测 | T3、T7 |
-| T9 Skill 和双客户端 | 各自配置及 Skill 安装发现；真实 Codex/Claude Code 不借助 CLI/shell 补缺，完成两后端 MCP 全链路并留证 | T8 |
+| T9 Skill 和双客户端 | 各自配置及 Skill 安装发现；两客户端均完成 reference-api 主链路，Codex 完成 workflow-api，分别留证 | T8 |
 | T10 本地集成验证 | Python 3.12 + uv、基础 wheel/引擎缓存、审核包回放、两后端故障矩阵与脱敏产物、增补独立审核；不配置 CI | T7–T9 |
 
-检查点 A：T1–T5 先接通 reference-api 首条链路、审核门槛和失败清理，再接入控制步骤；资产继续用于交付。检查点 B：T6–T8 功能/压测、CLI/MCP 同源，人工决定记录及自动报告可用。M1 完成：T9–T10 两后端真实生成、实际人工审核、批准后自动收尾、无 Agent 回放、压测阈值、新版独立审核和本地集成验证均有证据。仅有 MCP、CLI 或 Skill 任意一个不算完成。
+检查点 A：T1–T5 接通 reference-api 首条链路、审核门槛和失败清理，再接入控制步骤。检查点 B：T6–T8 功能/压测、CLI/MCP 同源，人工决定记录及自动报告可用。当前首版按用户确认的核心用途收尾：MCP + Skill 实操引导、业务与调用链计划、功能/并发执行、清理和报告均可用，已有实际人工审核、双客户端主链路、第二后端及无模型回放证据。其余设计差异作为当前限制记录。
 
 实施时建立命令：
 
