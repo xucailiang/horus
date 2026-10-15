@@ -56,10 +56,10 @@ observations until the final checks run.
 Once approved, a Worker follows the plan, prepares the data, runs HTTP checks with
 Hurl and basic load tests with k6, then cleans up and produces a report. State and
 variables are isolated between runs. Each test has one directory containing its
-plan and reports. The main report is an offline HTML page in the conversation
-language: business flow, branches and cleanup come first, followed by the test data.
-Click a diagram node to inspect its result, filter cases, search, or expand details.
-JSON, Markdown, and JUnit files are also included. Reviewed plans can be exported,
+plan and reports. Both the plan and report are Markdown, in the conversation
+language, with the same Mermaid diagrams showing business flow, branches, waiting
+and cleanup. The report follows with tables of expected and observed results and
+performance data. JSON and JUnit files are also included. Reviewed plans can be exported,
 imported, and replayed through the base CLI without MCP or a model.
 
 Independent functional cases can run together, with an approved limit of one or

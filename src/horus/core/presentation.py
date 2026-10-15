@@ -62,9 +62,9 @@ def plan_document(
     text = labels(plan.report.language, plan.report.labels)
     limits = config.policy.limits
     lines = [
-        f"# {text['plan']} · {plan.name}",
+        f"# {text['plan']} · {markdown_text(plan.name)}",
         "",
-        plan.businessUnderstanding.summary,
+        markdown_text(plan.businessUnderstanding.summary),
         "",
         f"- {text['target']}: {config.environments[environment].baseUrl}",
         f"- {text['environment']}: {environment}",
@@ -83,15 +83,15 @@ def plan_document(
     def describe(steps: list[dict[str, Any]], indent: str = "") -> None:
         for step in steps:
             a = action(step)
-            lines.append(indent + "- " + step_title(step, text))
+            lines.append(indent + "- " + markdown_text(step_title(step, text)))
             if step.get("kind") == "branch":
-                lines.append(indent + "  " + predicate_text(step["predicate"]))
+                lines.append(indent + "  - " + markdown_text(predicate_text(step["predicate"])))
                 for side in ["then", "else"]:
-                    lines.append(indent + "  " + text[side] + ":")
+                    lines.append(indent + "  - " + text[side] + ":")
                     describe(step[side + "Steps"], indent + "    ")
                 continue
             if a.get("identityRef"):
-                lines.append(indent + f"  {text['identity']}: {a['identityRef']}")
+                lines.append(indent + f"  - {text['identity']}: {markdown_text(a['identityRef'])}")
             for check in a.get("assertions", []):
                 if check.get("jsonSchema") is not None:
                     detail = ""
@@ -102,11 +102,11 @@ def plan_document(
                         check.get("expected"))
                     detail = text.get(check.get("operator", "eq"), "") + " " + json.dumps(
                         expected, ensure_ascii=False)
-                lines.append(indent + "  " + check_title(check, text) +
-                             (": " + detail if detail else ""))
+                lines.append(indent + "  - " + markdown_text(check_title(check, text)) +
+                             (": " + markdown_text(detail) if detail else ""))
             if step.get("kind") == "poll":
                 lines.append(
-                    indent + f"  {text['poll']}: {predicate_text(step['until'])}; "
+                    indent + f"  - {text['poll']}: {markdown_text(predicate_text(step['until']))}; "
                     f"≤ {step['maxAttempts']} × {step['intervalMs']} ms; "
                     f"≤ {step['timeoutMs']} ms"
                 )
@@ -114,7 +114,7 @@ def plan_document(
                 profile = step["loadProfile"]
                 lines.extend(
                     [
-                        indent + f"  {text['vus']}: {profile['vus']}; "
+                        indent + f"  - {text['vus']}: {profile['vus']}; "
                         f"{text['completedIterations']}: {profile['iterations']}; "
                         f"≤ {profile['maxDurationMs'] / 1000:g} s"
                     ]
@@ -123,7 +123,7 @@ def plan_document(
                     if threshold:
                         lines.append(
                             indent
-                            + "  "
+                            + "  - "
                             + text.get(key, key)
                             + ": "
                             + ("≤ " if "lte" in threshold else "= ")
@@ -131,14 +131,19 @@ def plan_document(
                             + (" ms" if key.endswith("Ms") else "")
                         )
 
+    if plan.businessUnderstanding.flows:
+        lines.extend("- " + markdown_text(flow.description)
+                     for flow in plan.businessUnderstanding.flows)
+        lines.append("")
     for case in data["cases"]:
-        lines.extend(["### " + (case.get("title") or case["id"]) + " · " + text[case["kind"]], ""])
+        lines.extend(["### " + markdown_text(case.get("title") or case["id"]) +
+                      " · " + text[case["kind"]], ""])
+        lines.extend([mermaid_diagram([case], text), ""])
         describe(case["steps"])
         lines.extend(["", text["cleanup"] + ":"])
         describe(case["cleanup"])
         lines.append("")
     for key, title in [
-        ("flows", "logic"),
         ("rules", "rules"),
         ("assumptions", "unknowns"),
         ("conflicts", "unknowns"),
@@ -150,13 +155,14 @@ def plan_document(
             for entry in entries:
                 lines.append(
                     "- "
-                    + entry["description"]
-                    + (" · " + entry["impact"] if entry.get("impact") else "")
+                    + markdown_text(entry["description"])
+                    + (" · " + markdown_text(entry["impact"]) if entry.get("impact") else "")
                 )
             lines.append("")
     lines.extend(["## " + text["uncovered"], ""])
     lines.extend(
-        "- " + item["itemId"] + ": " + item["reason"] for item in data["coverage"]["uncovered"]
+        "- " + markdown_text(item["itemId"]) + ": " + markdown_text(item["reason"])
+        for item in data["coverage"]["uncovered"]
     )
     lines.extend(
         [
@@ -171,3 +177,74 @@ def plan_document(
     )
     # Exact requests, variables, evidence and policies remain available alongside this text.
     return "\n".join(lines)
+
+
+def markdown_text(value: Any) -> str:
+    """Keep external content as text, including inside tables and headings."""
+    from html import escape
+
+    encoded = escape(str(value), quote=False)
+    for char in '\\`*_{}[]()|!':
+        encoded = encoded.replace(char, '\\' + char)
+    return encoded.replace('\r', ' ').replace('\n', ' ')
+
+
+def mermaid_diagram(cases: list[dict[str, Any]], text: dict[str, str]) -> str:
+    """A fixed graph grammar; plan strings can only enter quoted node labels."""
+    lines = ['flowchart TD']
+    index = 0
+
+    def label(value: str) -> str:
+        escaped = {'"': '#34;', '#': '#35;', '`': '#96;', '&': '#38;',
+                   '<': '#60;', '>': '#62;', '\\': '#92;'}
+        return ''.join(escaped.get(char, char) for char in
+                       value.replace('\n', ' ').replace('\r', ' '))
+
+    def node(title: str, *, decision: bool = False) -> str:
+        nonlocal index
+        ref = 'n' + str(index)
+        index += 1
+        shape = '{"' + label(title) + '"}' if decision else '["' + label(title) + '"]'
+        lines.append('    ' + ref + shape)
+        return ref
+
+    def edge(left: str, right: str, title: str = '', *, cleanup: bool = False) -> None:
+        arrow = '-.->' if cleanup else '-->'
+        lines.append(f'    {left} {arrow}' + (f'|"{label(title)}"|' if title else '') +
+                     ' ' + right)
+
+    def chain(steps: list[dict[str, Any]],
+              incoming: list[tuple[str, str]] | None = None) -> list[tuple[str, str]]:
+        tails = incoming or []
+        for step in steps:
+            title = step_title(step, text)
+            if step.get("kind") == "branch":
+                title += " · " + predicate_text(step["predicate"])
+            elif step.get("kind") == "poll":
+                title += (" · " + predicate_text(step["until"]) +
+                          f" · ≤ {step['maxAttempts']} × {step['intervalMs']} ms"
+                          f" · ≤ {step['timeoutMs'] / 1000:g} s")
+            elif step.get("kind") == "load":
+                profile = step["loadProfile"]
+                title += (f" · {text['vus']}: {profile['vus']}"
+                          f" · {text['completedIterations']}: {profile['iterations']}")
+            current = node(title, decision=step.get("kind") == "branch")
+            for previous, caption in tails:
+                edge(previous, current, caption)
+            if step.get("kind") == "branch":
+                tails = [tail for side in ["then", "else"]
+                         for tail in chain(step[side + "Steps"], [(current, text[side])])]
+            else:
+                tails = [(current, "")]
+        return tails
+
+    for case_index, case in enumerate(cases):
+        lines.append(f'    subgraph c{case_index}["{label(case.get("title") or case["id"])}"]')
+        tails = chain(case["steps"])
+        if case["cleanup"]:
+            cleanup_start = node(text["cleanup"])
+            for tail, caption in tails:
+                edge(tail, cleanup_start, caption, cleanup=True)
+            chain(case["cleanup"], [(cleanup_start, "")])
+        lines.append("    end")
+    return '```mermaid\n' + '\n'.join(lines) + '\n```'

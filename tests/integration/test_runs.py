@@ -54,13 +54,14 @@ async def test_detached_worker_cleans_reports_and_deduplicates_start(
         assert (run_root / "junit.xml").exists()
         assert "artifactRef" in result
         report = json.loads((run_root / "report.json").read_bytes())
-        assert (run_root / "report.html").is_file()
+        assert (run_root / "report.md").is_file()
+        assert not (run_root / "report.html").exists()
         assert (run_root / "plan.md").is_file()
         assert json.loads((run_root / "plan.json").read_bytes()) == service.project(
             project).get("plans", plan_ref)
         assert report["testDirectory"] == str(run_root)
-        assert report["reportPath"] == str(run_root / "report.html")
-        assert "htmlArtifactRef" in report
+        assert report["reportPath"] == str(run_root / "report.md")
+        assert "artifactRef" in report and "htmlArtifactRef" not in report
         assert report["target"] == f"http://127.0.0.1:{server.server_port}"
         assert report["testDesign"]["coverage"]["rules"][0]["ruleId"] == "value"
         coverage = report["executionCoverage"]["assertions"]

@@ -515,7 +515,7 @@ class ReportPresentation(Model):
     labels: dict[str, str] = Field(
         default_factory=dict,
         json_schema_extra={"x-labels": {k: v for k, v in EN.items()}},
-        description="UI translations. Required in full for languages "
+        description="Document labels. Required in full for languages "
         "other than English or Chinese; see x-labels for all keys.",
     )
 

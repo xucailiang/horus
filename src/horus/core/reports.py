@@ -6,9 +6,10 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from horus.core.html_report import render_html
+from horus.core.markdown_report import render_markdown
 from horus.core.models import BranchStep, LoadStep, Plan, ProjectConfig, ResourceMetrics, Step
-from horus.core.presentation import plan_document
+from horus.core.presentation import mermaid_diagram, plan_document
+from horus.core.report_text import labels
 from horus.core.resources import resource_summary
 from horus.core.service import Service
 from horus.core.steps import request_action, walk_steps
@@ -220,12 +221,16 @@ def snapshot_test(service: Service, root: Path, intent: dict[str, Any]) -> dict[
     if not content:
         validation = service._validate(store, plan, config, intent["environment"])
         content = plan_document(plan, config, intent["environment"], validation)
+    if "```mermaid\n" not in content:
+        text = labels(plan.report.language, plan.report.labels)
+        content += "\n\n## " + text["logic"] + "\n\n" + "\n\n".join(
+            mermaid_diagram([case], text) for case in plan.model_dump(mode="json")["cases"])
     atomic_write(root / "plan.json", raw)
     atomic_write(root / "config.json", config.model_dump(mode="json"))
     atomic_write(root / "review.json", review)
     (root / "plan.md").write_text(content, encoding="utf-8")
     (root / "plan.md").chmod(0o600)
-    return {"testDirectory": str(root), "reportPath": str(root / "report.html")}
+    return {"testDirectory": str(root), "reportPath": str(root / "report.md")}
 
 
 def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[str, Any]:
@@ -356,19 +361,16 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
     if "resourceMetrics" in result:
         lines.extend(resource_summary(ResourceMetrics.model_validate(result["resourceMetrics"])))
     text = "\n".join(lines) + "\n"
+    text = render_markdown(result, plan.model_dump(mode="json") if plan else None, text)
     artifact = service.project(result["projectRef"]).put(
-        "artifacts", {"kind": "report", "content": text}
+        "artifacts", {"kind": "report", "mediaType": "text/markdown", "content": text}
     )
     result["artifactRef"] = artifact
-    result.update(testDirectory=str(root), reportPath=str(root / "report.html"))
-    html = render_html(result, plan.model_dump(mode="json") if plan else None)
-    result["htmlArtifactRef"] = service.project(result["projectRef"]).put(
-        "artifacts", {"kind": "report-html", "mediaType": "text/html", "content": html}
-    )
-    (root / "report.html").write_text(html, encoding="utf-8")
-    (root / "report.html").chmod(0o600)
+    result.update(testDirectory=str(root), reportPath=str(root / "report.md"))
+    result.pop("htmlArtifactRef", None)
     atomic_write(root / "report.json", result)
-    (root / "report.md").write_text(text)
+    (root / "report.md").write_text(text, encoding="utf-8")
+    (root / "report.md").chmod(0o600)
     (root / "junit.xml").write_bytes(ET.tostring(suite, encoding="utf-8", xml_declaration=True))
     summary = {
         k: v for k, v in result.items() if k not in {"cases", "testDesign", "executionCoverage"}

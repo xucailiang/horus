@@ -1,6 +1,6 @@
 ---
 name: horus
-description: Test HTTP APIs through horus MCP in Codex or Claude Code. Understand the business, preview a plan directly in chat, save it only after human confirmation, then execute and deliver an interactive HTML report in the conversation language.
+description: Test HTTP APIs through horus MCP in Codex or Claude Code. Understand the business, preview a plan directly in chat, save it only after human confirmation, then execute and deliver a Markdown report with Mermaid business-flow diagrams in the conversation language.
 ---
 
 The host Agent understands and plans; horus executes, cleans up, and reports facts.
@@ -45,7 +45,7 @@ not the OS locale, API documentation language, or an old report. For example, us
 business understanding, case/step `title`, and assertion `description` naturally in
 that language. English and Chinese UI labels are built in. For another language,
 translate every `report.labels` entry listed in the schema's `x-labels`; never
-silently fall back to English. These labels are plain text, not HTML or scripts.
+silently fall back to English. These labels are plain text, not markup or scripts.
 Titles should explain business actions (such as “提交后不允许再次修改”), not repeat
 operation IDs. Assertion descriptions should explain what correct behavior means.
 The report reuses this reviewed wording; do not invent a different business story
@@ -125,7 +125,7 @@ Do not change expected results merely to make observed backend behavior pass.
    cards.** Do not send only a file link, raw JSON, hashes, or a long checklist of
    tool parameters. Explain the business goal, main call chain and expected results,
    then data changes and cleanup, fixed concurrency/request/time limits, and gaps.
-   Include a small flow diagram when it makes the logic clearer. Keep the wording
+   Include the generated Mermaid flow diagrams in the Markdown plan. Keep the wording
    readable; the user should be able to review it in the chat itself.
 3. End that reply with a short confirmation sentence in the conversation language,
    such as “确认这份计划后，我再保存并执行；需要调整请直接说。” Then wait.
@@ -156,27 +156,25 @@ replay; they are not the normal way to submit a new test plan to the user.
   including a replay or cleanup recovery, gets its own directory. A retry of the
   same start request returns the existing version. Never merge or overwrite an
   earlier run's plan/report. The directory contains `plan.md` (the confirmed text),
-  `plan.json` (the executable snapshot), `config.json`, `review.json`, `report.html`,
-  `report.json`, `report.md`, and `junit.xml`, along with execution evidence.
-- Deliver **`report.html` as the main report**, using `reportPath` to open/link it
-  with the host's file/browser tools. It works offline. For a client without access
-  to that path, retrieve `htmlArtifactRef` through `horus_get_artifact` (all pages)
-  and save the exact HTML locally. It remains readable on its own; copying the
-  server's whole test directory also makes the sibling plan/evidence links work.
-  Never paste the HTML source into chat as the report.
-- The HTML must show the reviewed business understanding and a **visual call-flow
-  diagram from the approved cases** before the test data. Include branches,
-  bounded waiting and cleanup. Planned steps remain visible even when not run;
-  show actual outcomes separately. Diagram nodes link to the corresponding data.
-  Do not replace the business diagram with only a metric chart or prose summary.
-- Explain results in the same conversation language, in plain terms: what was
-  tested, what was expected, what happened, what failed, and what remains unknown.
-  Define performance numbers in everyday language (e.g. “95% 的请求在 80 ms 内完成”).
-  Keep IDs, raw assertions and request/response details in expandable areas.
-  Use the report's filters, search and expandable details to make the data easy to
-  inspect. Include cleanup residue, untested behavior and authorized machine
-  observations. Never count an unselected path or unrun action as passed.
-  A failed test is a business result, not a broken MCP call to retry blindly.
+  `plan.json` (the executable snapshot), `config.json`, `review.json`, `report.md`,
+  `report.json`, and `junit.xml`, along with execution evidence.
+- Use **Markdown for both documents: `plan.md` and `report.md`**. Open/link
+  `reportPath` with the host's file tools. If that path is inaccessible, retrieve
+  `artifactRef` through `horus_get_artifact`, follow all pages, and save the exact
+  Markdown locally. Copying the whole test directory also preserves sibling links.
+- Both documents must contain **Mermaid business/test flow diagrams generated from
+  the same approved cases**. Show call order, condition branches, bounded waiting
+  and cleanup. In the report, put business understanding and the planned diagrams
+  before the actual results. Keep planned logic unchanged so the two documents can
+  be compared. Show outcomes in separate tables; never redraw the plan to hide a
+  skipped, failed or unexecuted path. Use a Markdown reader with Mermaid support.
+- Write in the conversation language, in plain terms: what was tested, what was
+  expected, what happened, what failed, and what remains unknown. Explain metrics
+  naturally (e.g. “95% 的请求在 80 ms 内完成”). Use tables for checks and performance
+  data; put raw IDs, requests/responses and technical evidence in the appendix.
+  Include cleanup residue, untested behavior and authorized machine observations.
+  Unselected branches and unrun actions do not count as passes. A failed test is a
+  business result, not a broken MCP call to retry blindly.
 - If a finished run needs cleanup recovery, call `horus_cleanup_run` with the original
   run ID and a stable request ID, then wait and read its report. It uses the existing
   approval, recoverable nonsecret IDs, and approved cleanup. Required authentication

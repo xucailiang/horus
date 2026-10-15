@@ -21,8 +21,8 @@ Set plan.report.language and all human-facing text to the current conversation l
 Call horus_preview_plan to validate without saving. Present its readable content DIRECTLY
 in chat, never in an Ask/question tool card. Wait for a real human confirmation, then
 call horus_confirm_plan with the SAME draft, previewRef and the actual confirmation.
-Each run saves plan.md, plan.json and report.html in the returned testDirectory.
-Open reportPath for the user: interactive business logic comes before per-test data.
+Each run saves plan.md, plan.json and report.md in the returned testDirectory.
+Open reportPath for the user: Mermaid business logic comes before per-test data.
 Use ${vars.name}, ${secrets.binding}, ${run.id}; double-brace templates are unsupported.
 Read optional project code using your host's existing tools. Put relevant source findings
 or user chat material in plan.supportingContext; cite these as context:<id>. No repository
@@ -133,7 +133,7 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
                     "performanceCasesExclusive": True,
                 },
                 "engines": engines,
-                "reports": ["offline-html", "markdown", "json", "junit"],
+                "reports": ["markdown-mermaid", "json", "junit"],
                 "planPreviewBeforeSave": True,
                 "executionReady": all(e["status"] == "ready" for e in engines.values()),
                 "gaps": [
@@ -352,7 +352,7 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
             status=payload["status"],
             summary=payload.get("verdict", payload["status"]),
             payload=payload,
-            refs={k: payload[k] for k in ("artifactRef", "htmlArtifactRef") if k in payload},
+            refs={"artifactRef": payload["artifactRef"]} if "artifactRef" in payload else {},
         )
 
     @server.tool()

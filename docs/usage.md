@@ -98,9 +98,8 @@ projects/<projectRef>/.horus/runs/<runId>/
   plan.json       exact executable plan snapshot
   config.json     configuration; credential binding names only
   review.json     approval and its scope
-  report.html     main interactive report
   report.json     full redacted result
-  report.md       Markdown evidence
+  report.md       main Markdown report with Mermaid diagrams
   junit.xml       machine-readable result
 ```
 
@@ -114,17 +113,16 @@ case/step `title`, and assertion `description`. English and Chinese UI text is b
 in; other languages require translations of all `report.labels` keys listed in the
 plan schema's `x-labels`. The report never guesses from the machine locale.
 
-Open the returned `reportPath`. The offline HTML first explains the approved
-business flow, then shows its executable sequence as a diagram, including branches,
-waiting and cleanup. Clicking a node opens that action's result. Filters, search,
-expandable checks and printing help inspect the data. Unrun actions and unselected
-paths remain visible; load results use aggregate evidence. Raw details remain in
-expandable sections. The diagram uses local HTML/SVG and needs no Mermaid CDN.
+Open `plan.md` and the returned `reportPath` (`report.md`) in a Markdown reader
+with Mermaid support. Both documents contain the same planned business-flow
+diagrams, generated from the approved cases: call order, condition branches,
+bounded waiting and cleanup. The report then uses tables to compare expectations
+with observations and show performance data. Unrun actions and unselected paths
+remain visible; load checks use aggregate evidence. Technical evidence is kept in
+an expandable appendix, with large excerpts marked and full data in `report.json`.
 
-`htmlArtifactRef` also provides the self-contained HTML through `horus_get_artifact`;
-follow every page before saving it. Sibling file links require copying the whole
-test directory. The legacy `artifactRef` provides paged Markdown, including bounded
-failure evidence; excerpts are marked and `report.json` retains the full result.
+`artifactRef` provides the Markdown through `horus_get_artifact`; follow every page
+before saving it. Sibling links require the other files from the test directory.
 After restoring a project, use `horus_get_plan` to read a saved plan, following
 `nextOffset` to the end. Reading an old plan alone does not approve a new test.
 

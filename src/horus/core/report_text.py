@@ -1,4 +1,4 @@
-"""Report UI copy. Host-authored plan content uses the same conversation language."""
+"""Document labels. Host-authored plan content uses the same conversation language."""
 
 EN = {
     "report": "Test report",
@@ -45,9 +45,8 @@ EN = {
     "else": "Condition not met",
     "branch": "Choose a path",
     "poll": "Wait for the expected state",
-    "flow_note": "From the approved plan. Each case has its own data; "
-    "arrows show its planned sequence, "
-    "not the order between cases. Cleanup is attempted even after a failure.",
+    "flow_note": "The diagram shows each case's planned sequence. Cases prepare independent data; "
+    "arrows do not define the order between cases. Cleanup is attempted even after a failure.",
     "coverage_note": "Conclusions apply only to the checks below. Unrun actions and "
     "unselected branches do not count as passes. Load checks use aggregate evidence.",
     "residue": "Cleanup and unresolved outcomes",
@@ -154,7 +153,7 @@ ZH = dict(
             "条件不成立",
             "按条件选择路径",
             "等待预期状态",
-            "图来自已确认的测试计划。各用例独立准备数据，箭头表示用例内的计划顺序，不代表用例之间的执行顺序。失败后仍会尝试清理。",
+            "图展示这份计划中的调用顺序。各用例独立准备数据，箭头不代表用例之间的执行顺序。失败后仍会尝试清理。",
             "结论仅适用于下面列出的检查。未执行的步骤和未选择的分支不计为通过；并发检查使用汇总数据。",
             "清理与未解决的问题",
             "未记录到尚未解决的资源或执行结果。",

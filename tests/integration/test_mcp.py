@@ -163,14 +163,14 @@ async def test_mcp_plan_review_execution_and_report_survive_client_disconnect(tm
                     {"projectRef": project, "artifactRef": result["artifactRef"]},
                 )
             ).structured_content["payload"]
-            assert "PASSED" in report["content"]
+            assert "**Passed**" in report["content"]
             assert not server.tokens and not server.records
     finally:
         server.shutdown()
         server.server_close()
 
 
-async def test_mcp_preview_does_not_save_draft_and_exposes_html_metadata(tmp_path):
+async def test_mcp_preview_does_not_save_draft_and_exposes_mermaid(tmp_path):
     service = Service(tmp_path, read_roots=[FIXTURES])
     project, original_plan, original_review = reviewed_regression_plan(
         service, 'http://127.0.0.1:1'
