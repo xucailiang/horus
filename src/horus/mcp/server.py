@@ -143,7 +143,7 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
 
     @server.tool(annotations={"readOnlyHint": True})
     async def horus_list_projects(offset: int = 0, limit: int = 20) -> Result:
-        """List persisted projects; page size is bounded to 100."""
+        """List persisted projects: start at offset 0, use limit 1–100, follow nextOffset."""
         if offset < 0 or not 1 <= limit <= 100:
             raise ToolError("invalid_page")
         projects = service.list_projects()
@@ -184,7 +184,11 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
     async def horus_get_context(
         projectRef: str, sourceRef: str, offset: int = 0, limit: int = 100
     ) -> Result:
-        """Read numbered documentation/code and operation catalog. Evidence uses sourceRef#Lx."""
+        """Read numbered documentation/code and operation catalog. Evidence uses sourceRef#Lx.
+
+        offset is a zero-based line index; start at 0 with limit 1–200.
+        Follow nextOffset until null. Returned evidence line numbers start at 1.
+        """
         return await invoke(
             projectRef, lambda: service.get_context(projectRef, sourceRef, offset, limit)
         )
@@ -200,7 +204,11 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
     async def horus_get_plan(
         projectRef: str, planRef: str, offset: int = 0, limit: int = 200,
     ) -> Result:
-        """Read saved plan JSON pages after reconnecting. This does not present or approve it."""
+        """Read saved plan JSON pages after reconnecting; this does not present or approve it.
+
+        offset is a zero-based line index; start at 0 with limit 1–200.
+        Follow nextOffset until null to read the complete plan.
+        """
         return await invoke(
             projectRef, lambda: service.get_plan(projectRef, planRef, offset, limit)
         )
@@ -227,7 +235,11 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
     async def horus_get_artifact(
         projectRef: str, artifactRef: str, offset: int = 0, limit: int = 200
     ) -> Result:
-        """Read bounded review/report content. Reading review material records retrieval only."""
+        """Read review/report content; reading review material records retrieval only.
+
+        offset is a zero-based line index; start at 0 with limit 1–200.
+        Follow nextOffset until null to read the complete artifact.
+        """
         return await invoke(
             projectRef, lambda: service.get_artifact(projectRef, artifactRef, offset, limit)
         )
@@ -244,7 +256,8 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
     ) -> Result:
         """Record an actual human decision after displaying this version; never invent approval.
 
-        source is conversation or CLI. confirmation is the real message reference or excerpt.
+        decision is approved or rejected. source is conversation or CLI.
+        confirmation is the real message reference or excerpt.
         This trusted-local record is not independent identity authentication.
         """
         if source not in {"conversation", "CLI"}:
