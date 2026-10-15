@@ -85,6 +85,15 @@ Runs produce `summary.json`, `report.json`, `report.md`, and `junit.xml`, plus a
 MCP-readable report artifact. Runtime payloads are redacted before persistence.
 Control fields and verdicts are kept separate from payload redaction.
 
+Regex assertions use ECMAScript Unicode semantics. Functional checks use the
+[`regress` binding](https://github.com/crate-py/regress); load checks use k6's
+`RegExp` with the `u` flag. A functional response's regex matches run together in
+a private child process with a one-second limit. The same guardian and project
+lease used for HTTP/load processes stop it after timeout, cancellation, or Worker
+death. Raw matching inputs are removed with the private temporary directory.
+Load plans reject Unicode property escapes before review because the pinned k6
+runtime does not implement those matches correctly. Functional checks support them.
+
 k6 reports configured/observed VUs, completed iterations, request count,
 throughput, average/P50/P95/P99/max latency, HTTP error rate, and per-response
 data-check failure rate. Missing samples, incomplete execution, or absent
@@ -99,7 +108,7 @@ verdict. horus does not implement an SSH service or remote monitoring agent.
 ## Current limits
 
 HTTP and load steps are implemented. Identity profiles, conditional branches,
-bounded polling, regular-expression assertions, and parallel functional cases
+bounded polling and parallel functional cases
 remain development work. Common Swagger UI discovery
 patterns are supported; arbitrary dynamic pages and external schema references
 may require a direct, self-contained API definition.

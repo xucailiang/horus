@@ -25,6 +25,12 @@ def engine_path(name: str) -> str:
 async def run_engine(
     name: str, args: list[str], *, timeout: float, env: dict[str, str] | None = None
 ) -> tuple[int, bytes, bytes]:
+    return await run_process(engine_path(name), args, timeout=timeout, env=env)
+
+
+async def run_process(
+    executable: str, args: list[str], *, timeout: float, env: dict[str, str] | None = None
+) -> tuple[int, bytes, bytes]:
     lifetime_read, lifetime_write = os.pipe()
     lease = EXECUTION_LEASE.get()
     try:
@@ -33,7 +39,7 @@ async def run_engine(
             "-m",
             "horus.adapters.guardian",
             str(lifetime_read),
-            engine_path(name),
+            executable,
             *args,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
@@ -80,7 +86,7 @@ async def run_engine(
             os.close(lifetime_write)
     output, errors = await asyncio.gather(stdout, stderr)
     if len(output) > MAX_OUTPUT or len(errors) > MAX_OUTPUT:
-        raise HorusError("engine_output_truncated", name)
+        raise HorusError("engine_output_truncated", Path(executable).name)
     return process.returncode or 0, output, errors
 
 

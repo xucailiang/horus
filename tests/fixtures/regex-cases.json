@@ -1,0 +1,12 @@
+[
+  ["^工单-[0-9]{4}$", "工单-0123", true],
+  ["^工单-[0-9]{4}$", "工单-12", false],
+  ["^.$", "😀", true],
+  ["^.$", "\r", false],
+  ["^\\s$", "\uFEFF", true],
+  ["^\\d+$", "１２３", false],
+  ["^(a)\\1$", "aa", true],
+  ["ready", "already available", true],
+  [".*", 42, false],
+  [".*", null, false]
+]

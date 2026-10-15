@@ -9,6 +9,7 @@ from urllib.parse import quote, urlencode
 from jsonschema import Draft4Validator, Draft202012Validator
 from openapi_schema_validator import OAS30ReadValidator, OAS31Validator
 
+from horus.adapters.patterns import match_patterns
 from horus.adapters.process import MAX_OUTPUT, run_engine
 from horus.core.models import Assertion, Request
 from horus.core.store import HorusError
@@ -52,8 +53,10 @@ class Response:
     body: Any
     elapsed_ms: float
 
-    def check(self, assertions: list[Assertion]) -> list[dict[str, Any]]:
-        results = []
+    async def check(self, assertions: list[Assertion]) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        patterns = []
+        pattern_indices = []
         for assertion in assertions:
             actual: Any = None
             expected: Any = assertion.expected
@@ -79,7 +82,14 @@ class Response:
                     actual = self.headers.get(assertion.header.lower(), MISSING)
                 elif assertion.elapsedMs:
                     actual = self.elapsed_ms
-                passed = compare(actual, assertion.operator, expected)
+                if assertion.operator == "regex":
+                    passed = False
+                    if isinstance(actual, str):
+                        assert isinstance(expected, str)
+                        pattern_indices.append(len(results))
+                        patterns.append((expected, actual))
+                else:
+                    passed = compare(actual, assertion.operator, expected)
             results.append(
                 {
                     "id": assertion.id,
@@ -92,6 +102,9 @@ class Response:
                     "evidenceRefs": assertion.evidenceRefs,
                 }
             )
+        for index, passed in zip(pattern_indices, await match_patterns(patterns), strict=True):
+            if not assertions[index].tentative:
+                results[index]["status"] = "passed" if passed else "failed"
         return results
 
 

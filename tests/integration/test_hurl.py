@@ -19,7 +19,7 @@ async def test_hurl_returns_actual_body_and_checks_200_data_error():
         )
         assert response.status == 200
         assert response.body["value"] == 43
-        checks = response.check(
+        checks = await response.check(
             [
                 Assertion(
                     id="value", jsonPointer="/value", expected=42, evidenceRefs=["fixture-contract"]

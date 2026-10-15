@@ -103,8 +103,8 @@ distinguishes these regressions from actual Agent generation and human approval.
 horus is in early development. The first execution flow and base-wheel replay have
 been verified locally; the full M1 milestone is still open. Native acceptance in
 both clients, including actual human confirmation, and a second workflow backend
-remain to be completed. Identity profiles, branches, polling, parallel functional
-cases and regular-expression assertions are also pending.
+remain to be completed. Identity profiles, branches, polling, and parallel functional
+cases are also pending.
 Automated fixture approvals do not count as human acceptance.
 
 The Chinese [requirements](docs/PRD-horus.md),

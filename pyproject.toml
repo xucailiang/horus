@@ -25,6 +25,7 @@ dependencies = [
   "jsonschema==4.26.0",
   "openapi-spec-validator==0.9.0",
   "openapi-schema-validator==0.9.0",
+  "regress==2026.9.1",
 ]
 
 [project.optional-dependencies]

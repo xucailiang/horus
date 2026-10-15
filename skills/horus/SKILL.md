@@ -49,6 +49,11 @@ include deletion verification in the failure path when required. Do not repeat a
 operation using a token already revoked by an earlier step.
 
 Negative cases need explicit error expectations. HTTP 200 alone is not a data pass.
+For string formats, `operator=regex` takes a plain ECMAScript Unicode pattern in
+`expected` (no `/` delimiters, at most 512 characters). It searches a JSON Pointer
+or header string; use `^` and `$` for full formats. Missing/nonstring values fail.
+Load regexes reject Unicode property escapes (`\p{...}` / `\P{...}`); use explicit
+ranges or functional checks for those patterns.
 Declare VUs, iterations, time limits, and thresholds. Functional parallelism is not
 load-test evidence. Fix validation errors without silently dropping required checks.
 Do not change expected results merely to make observed backend behavior pass.

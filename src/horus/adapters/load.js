@@ -4,6 +4,8 @@ import { Rate } from 'k6/metrics';
 const input = JSON.parse(__ENV.HORUS_K6_INPUT);
 const dataFailure = new Rate('horus_data_failure');
 const httpFailure = new Rate('horus_http_failure');
+const patterns = new Map(input.assertions.filter(a => a.operator === 'regex')
+  .map(a => [a.id, new RegExp(a.expected, 'u')]));
 let sampleCount = 0;
 
 export const options = {
@@ -46,6 +48,7 @@ function compare(actual, assertion) {
       : typeof actual === 'string' && actual.length === expected;
     case 'gte': return typeof actual === 'number' && typeof expected === 'number' && actual >= expected;
     case 'lte': return typeof actual === 'number' && typeof expected === 'number' && actual <= expected;
+    case 'regex': return typeof actual === 'string' && patterns.get(assertion.id).test(actual);
     case 'type': {
       const type = actual === null ? 'null' : Array.isArray(actual) ? 'array' : typeof actual;
       return expected === 'integer' ? Number.isInteger(actual) : type === expected;

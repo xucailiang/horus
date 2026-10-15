@@ -66,6 +66,17 @@ generates business understanding and executable cases, and validates the plan.
 Dynamic values use `${vars.name}`, `${secrets.binding}`, or `${run.id}`.
 Coverage references are fully qualified: `caseId.stepId.assertionId`.
 
+Use `operator: "regex"` to check a JSON Pointer or header string against a plain
+ECMAScript regular expression in `expected`, without `/` delimiters. Matching uses
+Unicode (`u`) semantics and searches within the string; use `^` and `$` when the
+whole value must follow a format, such as `^INV-[0-9]{6}$`. Patterns are limited to
+512 characters and checked before review. Missing and nonstring values fail.
+Load checks reject Unicode property escapes (`\p{...}` / `\P{...}`) before review
+because the pinned k6 runtime cannot match them correctly; use explicit ranges or
+a functional check for those patterns. An HTTP response's regex checks have
+a one-second matching-process limit; exceeding it reports an execution error and
+still enters cleanup. Load matching remains within the approved k6 run limits.
+
 It then prepares and reads the fixed review material, shows the exact target,
 actions, cleanup, load, thresholds, and gaps, and asks you to reply **“我确定”**
 to approve. Changes require a fresh review. General intent to test, or quoting

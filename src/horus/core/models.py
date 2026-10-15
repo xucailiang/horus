@@ -1,6 +1,8 @@
+import re
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from regress import Regex, RegressError
 
 
 class Model(BaseModel):
@@ -129,6 +131,7 @@ class Request(Model):
     A whole placeholder preserves its JSON type. $${...} escapes a literal.
     Double-brace templates such as {{token}} are unsupported.
     """
+
     pathParams: dict[str, JsonValue] = Field(default_factory=dict)
     query: dict[str, JsonValue] = Field(default_factory=dict)
     headers: dict[str, str] = Field(default_factory=dict)
@@ -150,6 +153,11 @@ class Capture(Model):
 
 
 class Assertion(Model):
+    """Regex uses a plain ECMAScript pattern with Unicode (`u`) semantics, without / delimiters.
+
+    It searches a JSON/header string; anchor with ^ and $ to check its full format.
+    """
+
     id: str
     status: int | list[int] | None = None
     jsonPointer: str | None = None
@@ -157,7 +165,7 @@ class Assertion(Model):
     elapsedMs: bool = False
     jsonSchema: dict[str, JsonValue] | None = None
     dialect: Literal["2020-12", "draft4", "oas30", "oas31"] | None = None
-    operator: Literal["eq", "ne", "exists", "type", "length", "gte", "lte"] = "eq"
+    operator: Literal["eq", "ne", "exists", "type", "length", "gte", "lte", "regex"] = "eq"
     expected: JsonValue = None
     evidenceRefs: list[str] = Field(min_length=1)
     tentative: bool = False
@@ -179,6 +187,17 @@ class Assertion(Model):
             raise ValueError("Assertion requires exactly one query")
         if self.jsonSchema is not None and self.dialect is None:
             raise ValueError("JSON Schema assertion requires a dialect")
+        if self.operator == "regex":
+            if self.jsonPointer is None and self.header is None:
+                raise ValueError("Regex requires a JSON Pointer or header string query")
+            if not isinstance(self.expected, str) or len(self.expected) > 512:
+                raise ValueError(
+                    "Regex expected must be an ECMAScript pattern of at most 512 characters"
+                )
+            try:
+                Regex(self.expected, flags="u")
+            except RegressError as exc:
+                raise ValueError("Invalid ECMAScript Unicode regular expression") from exc
         return self
 
 
@@ -226,6 +245,20 @@ class LoadStep(Model):
     assertions: list[Assertion] = Field(min_length=1)
     loadProfile: LoadProfile
     thresholds: Thresholds = Field(default_factory=Thresholds)
+
+    @model_validator(mode="after")
+    def supported_regex(self) -> Self:
+        for assertion in self.assertions:
+            if (
+                assertion.operator == "regex"
+                and isinstance(assertion.expected, str)
+                and re.search(r"(?<!\\)(?:\\\\)*\\[pP]\{", assertion.expected)
+            ):
+                raise ValueError(
+                    "k6 does not support Unicode property escapes in regex assertions; "
+                    "use explicit character ranges or a functional check"
+                )
+        return self
 
 
 Step = HttpStep | LoadStep
@@ -304,6 +337,7 @@ class Plan(Model):
     Coverage references must be fully qualified, e.g. caseId.stepId.assertionId.
     Approval is a separate human decision after reading the fixed review material.
     """
+
     schemaVersion: Literal["1"] = "1"
     name: str
     sourceRefs: list[str] = Field(min_length=1)

@@ -2,7 +2,7 @@
 
 当前范围：本阶段不建设 GitHub Actions 等 CI 流水线，使用本地测试、静态检查和打包验证。原设计中的 CI 部分仅作为后续参考。
 
-版本 v0.4，2026-10-15。状态：待实施技术方案。当前已保存文档及 .python-version；下述命令和工具是约定接口，程序尚未实现。
+方案基线 v0.4，2026-10-15。状态：M1 实施中。下文包含已实现能力与后续计划，当前实现和验收证据见 [实施记录](IMPLEMENTATION.md)。
 
 依据：[PRD v0.7](PRD-horus.md)、[ADR-0003](decisions/0003-autonomous-workflow-and-python312.md) 与 [ADR-0004](decisions/0004-mcp-primary-workflow.md)。主使用路径及两客户端接入示例见 [Agent + MCP 链路](AGENT-MCP-WORKFLOW.md)。首个正式交付 M1 包含 MCP Server、CLI、Skill、自动接入、业务理解与人工审核、完整功能链路、基础并发压测、自动报告和两个后端的通用性验收，不单独建设 PoC。
 
@@ -10,7 +10,7 @@
 
 | 项目 | 决定 |
 | --- | --- |
-| 语言 | 开发、测试、CLI/MCP/Worker 与 CI 统一 Python 3.12 系列；uv、pyproject.toml、uv.lock，发布 wheel |
+| 语言 | 开发、测试与 CLI/MCP/Worker 统一 Python 3.12 系列；uv、pyproject.toml、uv.lock，发布 wheel |
 | MCP | PrefectHQ 的 Python FastMCP 4.1.0；可选依赖 fastmcp-slim[server]==4.1.0，首版 stdio |
 | CLI | Typer，命令 horus，与 MCP 调用相同 Python 应用核心 |
 | 功能执行 | Hurl 8.0.1，独立进程，不 fork、不依赖内部 Rust API |
@@ -20,7 +20,7 @@
 | 响应结构 | jsonschema 4 与 openapi-schema-validator；显式按 JSON Schema/OAS 方言选择验证器，不修改响应、不补默认值、不强制类型转换 |
 | 测试 | pytest、pytest-asyncio、FastMCP Client/官方 MCP Python client，真实 HTTP fixture；Ruff、mypy 严格检查 |
 | 存储 | 文件及 JSONL，无数据库、消息队列或向量服务 |
-| 平台 | 首版 macOS/Linux，Linux CI；Windows、远程 HTTP MCP 和专属插件后续扩展 |
+| 平台 | 首版 macOS/Linux，本地验证；Windows、远程 HTTP MCP 和专属插件后续扩展 |
 
 Hurl、k6、FastMCP 是 2026-10-15 核对的发布版本。二进制版本、下载地址及校验信息写入工具清单；Python 依赖及 FastMCP 间接使用的官方 MCP SDK 版本在实施首次安装时写入 uv.lock。CI 不使用 latest、不重复编译引擎。
 
@@ -224,6 +224,9 @@ schemaVersion 固定为字符串 1，共享 Pydantic 严格模型是 CLI、MCP�
 | ApprovalRecord | reviewRef、reviewBundleRef、planRef、configRef、scopeHash、审核人标识、决定、时间、来源 CLI/conversation、确认消息引用/必要摘录、意见；独立于 Plan |
 
 首版功能检查：状态码/允许集合、header、响应耗时阈值、JSON Pointer 存在性/类型/相等/不等/数量/范围/正则、JSON Schema。跨步骤/接口字段关系使用捕获变量比较，不接受任意表达式。
+
+正则使用 operator=regex、expected 为无斜杠分隔符的模式字符串，采用 ECMAScript Unicode（u）搜索语义；完整格式检查使用 ^ 和 $。模式最长 512 字符，送审前检查语法；只匹配 JSON/header 字符串，缺失或其他类型不通过。HTTP 通过 regress 绑定匹配，同一响应的正则检查放入最多 1s 的受 guardian 保护子进程；超时归为执行错误，仍以捕获变量清理。k6 在初始化时编译 RegExp(u)，匹配受负载执行总时限约束。
+固定 k6 运行时对 Unicode 属性转义（\p{...}/\P{...}）匹配不正确，因此负载计划在送审前拒绝此语法，使用显式字符范围或改为功能检查；不能静默执行并产生错误结论。
 
 状态与身份测试沿用相同通用请求/断言：业务规则描述允许或禁止的状态变化，case 执行动作后检查状态和数据；负例用明确错误预期。identityRef 选择计划中声明的凭据绑定，token 仍通过显式鉴权步骤捕获并按身份隔离。缺少所需身份在送审前列缺口，不能借用另一个身份计为通过。
 

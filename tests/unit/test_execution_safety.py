@@ -337,3 +337,45 @@ async def test_repair_resolves_authentication_predecessors_without_replaying_pre
     await runner.repair({**runner.intent, "cases": []}, time.monotonic() + 10)
     assert not remaining
     assert sent[:2] == ["login", "login"]
+
+
+async def test_regex_timeout_preserves_captured_ids_for_finally_cleanup(tmp_path, monkeypatch):
+    runner = prepared_runner(tmp_path, monkeypatch)
+    runner.plan.cases = runner.plan.cases[:1]
+    runner.plan.cases[0].steps[1].assertions.append(
+        Assertion(
+            id="format",
+            jsonPointer="/name",
+            operator="regex",
+            expected="(a+)+$",
+            evidenceRefs=["contract"],
+        )
+    )
+    resources, tokens = {"resource"}, {"private-token"}
+
+    async def version(name):
+        return name
+
+    async def request(self, operation, base_url, request):
+        match operation["definition"]["operationId"]:
+            case "login":
+                return Response(200, {}, {"token": "private-token"}, 1)
+            case "createRecord":
+                return Response(201, {}, {"id": "resource", "name": "a" * 10000 + "!"}, 1)
+            case "deleteRecord":
+                resources.clear()
+                return Response(204, {}, None, 1)
+            case "getRecord":
+                return Response(404 if not resources else 200, {}, {}, 1)
+            case "logout":
+                tokens.clear()
+                return Response(204, {}, None, 1)
+
+    monkeypatch.setattr("horus.core.runner.check_engine", version)
+    monkeypatch.setattr(HurlAdapter, "request", request)
+    result = await runner.execute()
+    assert result["verdict"] == "error"
+    assert not resources and not tokens
+    report = json.loads((runner.root / "report.json").read_bytes())
+    assert report["cases"][0]["steps"][1]["reason"] == "regex_timeout"
+    assert all(step["status"] == "passed" for step in report["cases"][0]["cleanup"])

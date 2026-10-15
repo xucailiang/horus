@@ -125,7 +125,8 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
                 "executionReady": all(e["status"] == "ready" for e in engines.values()),
                 "gaps": [
                     "identity, branch and poll support are pending",
-                    "regular-expression assertions are pending",
+                    "parallel functional cases are pending",
+                    "k6 regex assertions do not support Unicode property escapes",
                 ],
                 "readRoots": [str(p) for p in service.read_roots],
             },

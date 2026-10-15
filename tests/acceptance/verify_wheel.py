@@ -56,6 +56,21 @@ def main() -> None:
             "assert (p/'skill/SKILL.md').is_file(); "
             "assert (p/'skill/references/resource-monitoring.md').is_file()",
         ], env=env, cwd=root, check=True)
+        subprocess.run([
+            str(python), "-c", """
+import asyncio
+from horus.adapters.hurl import Response
+from horus.core.models import Assertion
+checks = asyncio.run(Response(200, {}, {"value": "😀"}, 1).check([
+    Assertion(id="unicode", jsonPointer="/value", operator="regex", expected="^.$",
+              evidenceRefs=["fixture-contract"]),
+    Assertion(id="mismatch", jsonPointer="/value", operator="regex", expected="^[A-Z]+$",
+              evidenceRefs=["fixture-contract"]),
+]))
+assert [check["status"] for check in checks] == ["passed", "failed"]
+""",
+        ], env=env, cwd=root, check=True)
+        print("base wheel: Unicode regex pass/fail and matching child process verified")
         for mode, code, verdict in [("normal", 0, "passed"), ("data-error", 1, "failed")]:
             server = ReferenceServer(
                 0, mode=mode, username=env["HORUS_USERNAME"], password=env["HORUS_PASSWORD"]

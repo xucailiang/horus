@@ -276,7 +276,7 @@ class Runner:
                     a.model_validate(resolve(a.model_dump(mode="json"), context))
                     for a in step.assertions
                 ]
-                checks = response.check(assertions)
+                checks = await response.check(assertions)
                 status = (
                     "failed"
                     if any(c["status"] == "failed" for c in checks)
