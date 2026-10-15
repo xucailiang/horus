@@ -212,12 +212,12 @@ class Runner:
             "variables": {},
         }
         try:
-            materialized = resolve(step.model_dump(mode="json"), context)
-            request = Request.model_validate(materialized["request"])
             if isinstance(step, HttpStep) and not set(step.requires).issubset(context["vars"]):
                 return self.event(
                     {**record, "status": "skipped", "reason": "missing_cleanup_inputs"}
                 )
+            materialized = resolve(step.model_dump(mode="json"), context)
+            request = Request.model_validate(materialized["request"])
             operation = self.operations[step.operationId]
             self.ledger.append(entry)
             self.persist_ledger()

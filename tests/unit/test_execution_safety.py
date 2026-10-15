@@ -155,3 +155,21 @@ async def test_secret_equal_to_control_word_cannot_change_test_verdict(tmp_path,
     assert action["id"] == "failed"
     assert action["assertions"][0]["status"] == "failed"
     assert action["response"]["body"]["message"] == "[REDACTED]"
+
+
+async def test_cleanup_with_missing_captures_skips_before_materializing_request(
+    tmp_path, monkeypatch
+):
+    runner = prepared_runner(tmp_path, monkeypatch)
+    step = HttpStep.model_validate({
+        "id": "delete", "operationId": "deleteRecord",
+        "request": {"pathParams": {"id": "${vars.recordId}"}},
+        "requires": ["recordId"],
+        "assertions": [{"id": "status", "status": 204, "evidenceRefs": ["contract"]}],
+    })
+    action = await runner.step(
+        step, {"vars": {}, "secrets": {}, "run": {}}, case_id="missing", cleanup=True
+    )
+    assert action["status"] == "skipped"
+    assert action["reason"] == "missing_cleanup_inputs"
+    assert not runner.ledger
