@@ -14,8 +14,9 @@ VERSIONS = {"hurl": "8.0.1", "k6": "2.3.0"}
 def install(root: Path) -> None:
     system = platform.system()
     machine = platform.machine()
-    arch = {"arm64": "aarch64", "aarch64": "aarch64",
-            "x86_64": "x86_64", "AMD64": "x86_64"}[machine]
+    arch = {"arm64": "aarch64", "aarch64": "aarch64", "x86_64": "x86_64", "AMD64": "x86_64"}[
+        machine
+    ]
     target = {"Darwin": "apple-darwin", "Linux": "unknown-linux-gnu"}[system]
     downloads = root / "downloads"
     binary_dir = root / "bin"
@@ -30,12 +31,30 @@ def install(root: Path) -> None:
         ("hurl", "Orange-OpenSource/hurl", VERSIONS["hurl"], hurl, hurl + ".sha256"),
         ("k6", "grafana/k6", "v" + VERSIONS["k6"], k6, "k6-v2.3.0-checksums.txt"),
     ]:
-        subprocess.run(["gh", "release", "download", tag, "--repo", repo,
-                        "--pattern", asset, "--pattern", checksums, "--dir", str(downloads),
-                        "--skip-existing"], check=True)
+        subprocess.run(
+            [
+                "gh",
+                "release",
+                "download",
+                tag,
+                "--repo",
+                repo,
+                "--pattern",
+                asset,
+                "--pattern",
+                checksums,
+                "--dir",
+                str(downloads),
+                "--skip-existing",
+            ],
+            check=True,
+        )
         lines = (downloads / checksums).read_text().splitlines()
-        expected = next(line.split()[0] for line in lines
-                        if len(line.split()) == 1 or line.split()[-1].lstrip("*") == asset)
+        expected = next(
+            line.split()[0]
+            for line in lines
+            if len(line.split()) == 1 or line.split()[-1].lstrip("*") == asset
+        )
         archive = downloads / asset
         if hashlib.sha256(archive.read_bytes()).hexdigest() != expected:
             raise ValueError(f"Checksum mismatch: {asset}")
@@ -52,8 +71,7 @@ def install(root: Path) -> None:
         destination = binary_dir / name
         destination.write_bytes(content)
         destination.chmod(0o755)
-        subprocess.run([str(destination), "--version" if name == "hurl" else "version"],
-                       check=True)
+        subprocess.run([str(destination), "--version" if name == "hurl" else "version"], check=True)
     print(f"Verified engines installed in {binary_dir}")
 
 

@@ -1,0 +1,96 @@
+openapi: 3.1.0
+info:
+  title: Reference API
+  version: '1'
+paths:
+  /healthz:
+    get:
+      operationId: health
+      responses:
+        '200': {description: Healthy}
+  /auth/token:
+    post:
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: {type: string}
+                password: {type: string}
+      responses:
+        '200':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token]
+                properties:
+                  token: {type: string}
+        '401': {description: Invalid credentials}
+  /auth/logout:
+    post:
+      operationId: logout
+      security: [{bearer: []}]
+      responses:
+        '204': {description: Session revoked}
+  /records:
+    post:
+      operationId: createRecord
+      security: [{bearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, value]
+              properties:
+                name: {type: string}
+                value: {type: integer}
+      responses:
+        '201':
+          description: Record created with generated id and original fields
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Record'}
+        '400': {description: Invalid record}
+    get:
+      operationId: listRecords
+      security: [{bearer: []}]
+      responses:
+        '200': {description: List of records with original fields}
+  /records/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    get:
+      operationId: getRecord
+      security: [{bearer: []}]
+      responses:
+        '200':
+          description: Original record, including unchanged value
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Record'}
+        '404': {description: Not found}
+    delete:
+      operationId: deleteRecord
+      security: [{bearer: []}]
+      responses:
+        '204': {description: Deleted}
+        '404': {description: Not found}
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer}
+  schemas:
+    Record:
+      type: object
+      required: [id, name, value]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        value: {type: integer}

@@ -42,6 +42,7 @@ packages = ["src/horus"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 asyncio_mode = "auto"
 markers = ["agent: real host and human acceptance"]
 
