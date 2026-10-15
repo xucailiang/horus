@@ -59,6 +59,11 @@ variables are isolated between runs. You can read the report in the conversation
 or use its JSON, Markdown, and JUnit files. Reviewed plans can also be exported,
 imported, and replayed through the base CLI without MCP or a model.
 
+Independent functional cases can run together, with an approved limit of one or
+two cases including their cleanup. Each keeps its own data and credentials. Load
+cases wait for that group to finish and run exclusively, so another case's setup
+or cleanup does not overlap the measurements.
+
 A run can continue after the host disconnects, and a repeated start request returns
 the existing run. If the Worker dies, its engines are stopped. Cancellation and
 cleanup have explicit time limits.
@@ -119,11 +124,12 @@ horus is in early development. API import, plan review, HTTP checks, basic load
 testing, cleanup reports, and base-wheel replay have been verified locally. A
 second test backend exercises ownership checks and load testing across identities.
 
-The first milestone, M1, is still open. The full workflow in both native clients,
-including actual human confirmation, remains to be accepted. Parallel functional
-cases are also unfinished. The second backend's state, asynchronous workflow, and
-both conditional paths have local regressions. Automated fixture approvals do not
-count as human acceptance.
+The first milestone, M1, is still open. A sample plan drafted in Claude Code,
+corrected through MCP, and approved by an actual user has completed its HTTP and
+load checks. Functional parallelism and the second backend's state, asynchronous
+workflow, and conditional paths have local regressions. Full acceptance in both
+native clients and a separately reviewed follow-up plan are still pending.
+Automated fixture approvals do not count as human acceptance.
 
 The Chinese [requirements](docs/PRD-horus.md),
 [technical design](docs/TECHNICAL-DESIGN.md), and

@@ -35,6 +35,10 @@ contracts are independent of fault modes. Tests cover:
   recovery must not run the alternative authentication path or resubmit work.
 - Branch output guarantees, identity scopes, existence guards, nested references,
   unselected Poll reports, and a timeout that must block later writes while cleaning up.
+- Functional case limits of one/two, independent credentials and IDs, cleanup holding
+  a slot, ordinary failures, and performance barriers, observed by a real HTTP backend.
+  Cancellation stops a poll while a sibling write finishes and cleans up; deadlines
+  clean both active cases, and crash recovery does not start queued cases.
 - HTTP 200 with incorrect data, excessive latency, and HTTP failures.
 - Review gates, immutable references, scope mismatch, and cross-project isolation.
 - Idempotent starts, disconnect/reconnect, cancellation during cleanup, and engine
@@ -56,10 +60,12 @@ They are never counted as actual human approval.
 `tests.acceptance.verify_wheel` creates a clean Python 3.12 environment, exports
 hash-locked base dependencies from `uv.lock`, and installs the built wheel without
 MCP extras. It verifies packaged Skill/JavaScript files, imports an existing review
-package, and runs normal, data-error, and both conditional paths of a two-identity
-workflow through the CLI. The workflow includes polling, state checks, and independent load.
+package, and runs normal, data-error, both conditional paths of a two-identity
+workflow, and parallel functional cases through the CLI. The workflow includes
+polling, state checks, and independent load. The parallel fixture observes actual
+overlap, the case limit, isolated credentials, and the barrier around load.
 
-The expected exit codes are 0, 1, 0, and 0 respectively. Every run must remove its
+The expected exit codes are 0, 1, 0, 0, and 0 respectively. Every run must remove its
 records/tickets and revoke its sessions. No model API, MCP server, or business source
 checkout is needed. The same CLI can replay a reviewed plan against an already
 deployed test service. The project uses local verification and has no hosted CI
@@ -109,7 +115,8 @@ an SDK-only round trip must be reported as incomplete native acceptance.
 
 ## Remaining acceptance work
 
-The first deterministic slice is implemented and locally verified. Complete
-two-client native generation and actual human approval, plus parallel functional cases before claiming
-the full M1 milestone. See [implementation notes](IMPLEMENTATION.md) for current
-evidence and gaps.
+The deterministic execution paths are implemented and locally verified. A sample
+plan has passed after actual human approval, with MCP disconnect/reconnect during
+the run. Native acceptance in both clients and a separately reviewed follow-up
+plan remain open. See [implementation notes](IMPLEMENTATION.md) for the evidence
+and gaps; the MCP round trip does not complete native client acceptance.

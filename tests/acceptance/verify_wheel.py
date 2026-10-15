@@ -13,8 +13,10 @@ from horus.core.bundles import export_review
 from horus.core.service import Service
 from horus.core.store import atomic_write
 from tests.branch_plan import reviewed_branch_plan
+from tests.fixtures.recording_api import RecordingServer
 from tests.fixtures.reference_api import ReferenceServer
 from tests.fixtures.workflow_api import WorkflowServer
+from tests.parallel_plan import reviewed_parallel_plan
 from tests.support import FIXTURES, reviewed_regression_plan
 
 
@@ -80,6 +82,7 @@ assert [check["status"] for check in checks] == ["passed", "failed"]
         for mode, code, verdict in [
             ("normal", 0, "passed"), ("data-error", 1, "failed"),
             ("workflow-ready", 0, "passed"), ("workflow-wait", 0, "passed"),
+            ("parallel", 0, "passed"),
         ]:
             if mode.startswith("workflow"):
                 server = WorkflowServer(0, users={
@@ -87,6 +90,11 @@ assert [check["status"] for check in checks] == ["passed", "failed"]
                     env["HORUS_OUTSIDER_USERNAME"]: env["HORUS_OUTSIDER_PASSWORD"],
                 }, job_delay=0 if mode == "workflow-ready" else 0.4)
                 planner = reviewed_branch_plan
+            elif mode == "parallel":
+                server = RecordingServer(
+                    0, username=env["HORUS_USERNAME"], password=env["HORUS_PASSWORD"]
+                )
+                planner = reviewed_parallel_plan
             else:
                 server = ReferenceServer(
                     0, mode=mode, username=env["HORUS_USERNAME"], password=env["HORUS_PASSWORD"]
@@ -100,7 +108,7 @@ assert [check["status"] for check in checks] == ["passed", "failed"]
                 )
                 package = root / f"{mode}.json"
                 atomic_write(package, export_review(service, project, review))
-                workspace = root / f"ci-{mode}"
+                workspace = root / f"replay-{mode}"
                 command = [str(python), "-m", "horus"]
                 subprocess.run(command + [
                     "plan", "import", "--workspace", str(workspace), "--bundle", str(package),
@@ -124,6 +132,10 @@ assert [check["status"] for check in checks] == ["passed", "failed"]
                     assert branch["selected"] == ("then" if mode == "workflow-ready" else "else")
                 else:
                     assert not server.records
+                    if isinstance(server, RecordingServer):
+                        assert server.peak_functional_cases == 2 and server.read_overlaps
+                        assert not server.load_overlaps and not server.credential_mismatches
+                        assert summary["scheduling"]["peakFunctionalCases"] == 2
                 for path in workspace.rglob("*"):
                     if path.is_file():
                         text = path.read_text(errors="replace")

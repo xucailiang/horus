@@ -121,10 +121,13 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
                 "python": "3.12",
                 "sources": ["openapi-url", "swagger-ui-url", "local-openapi"],
                 "steps": ["http", "load", "poll", "branch"],
+                "scheduling": {
+                    "maxFunctionalParallelCases": 2,
+                    "performanceCasesExclusive": True,
+                },
                 "engines": engines,
                 "executionReady": all(e["status"] == "ready" for e in engines.values()),
                 "gaps": [
-                    "parallel functional cases are pending",
                     "k6 regex assertions do not support Unicode property escapes",
                 ],
                 "readRoots": [str(p) for p in service.read_roots],

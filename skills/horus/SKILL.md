@@ -85,6 +85,10 @@ For string formats, `operator=regex` takes a plain ECMAScript Unicode pattern in
 or header string; use `^` and `$` for full formats. Missing/nonstring values fail.
 Load regexes reject Unicode property escapes (`\p{...}` / `\P{...}`); use explicit
 ranges or functional checks for those patterns.
+Put independent functional chains in separate cases. Consecutive functional cases
+run within the reviewed `policy.limits.maxFunctionalParallelCases` (one or two,
+default two), including cleanup. Use one if their external state is shared. Each
+case keeps its own data and authentication; performance cases wait and run exclusively.
 Declare VUs, iterations, time limits, and thresholds. Functional parallelism is not
 load-test evidence. Fix validation errors without silently dropping required checks.
 Do not change expected results merely to make observed backend behavior pass.

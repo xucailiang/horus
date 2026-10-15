@@ -86,6 +86,14 @@ After the real decision is recorded, it starts once with a stable request ID,
 waits in bounded calls, and retrieves the automatic report. Missing responses do
 not justify starting a second run. Reports remain available after reconnection.
 
+Only place independent functional chains in separate cases. Consecutive functional
+cases share the reviewed `policy.limits.maxFunctionalParallelCases` limit (one or
+two, default two). Each case has its own variables and authentication, and holds
+its slot until cleanup finishes. Use one when the chains share external state.
+Case steps remain ordered. Performance cases wait for the previous group to
+finish, run exclusively through cleanup, then allow the next group to start.
+Reports show the actual functional peak separately from k6 VUs.
+
 ## Select identities
 
 The Agent can declare `identityProfiles` when a test needs multiple accounts.

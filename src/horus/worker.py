@@ -51,10 +51,10 @@ async def execute(workspace: Path, project: str, run_id: str) -> None:
     async def cancellation(execution: asyncio.Task[dict[str, Any]], runner: Runner) -> None:
         while not execution.done():
             if (root / "cancel.json").exists():
-                runner.cancelled = True
+                runner.request_cancel()
                 # Finish bounded HTTP requests so successful writes can be captured for cleanup.
                 # Load processes and preflight can stop immediately.
-                if runner.active_load or runner.active_poll or runner.phase == "queued":
+                if runner.phase == "queued":
                     execution.cancel()
                 return
             await asyncio.sleep(0.1)

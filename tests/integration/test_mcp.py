@@ -29,6 +29,13 @@ async def test_empty_workspace_stdio_discovers_tools_and_preserves_project(tmp_p
         assert "horus_prepare_review" in tools
         assert "horus_cleanup_run" in tools
         assert tools["horus_save_plan"].output_schema is not None
+        capabilities = (
+            await client.call_tool("horus_get_capabilities", {})
+        ).structured_content["payload"]
+        assert capabilities["scheduling"] == {
+            "maxFunctionalParallelCases": 2,
+            "performanceCasesExclusive": True,
+        }
         schema = (await client.call_tool("horus_get_plan_schema", {})).structured_content["payload"]
         assert "identityProfiles" in schema["properties"]
         assert "identityRef" in schema["$defs"]["LoadStep"]["properties"]

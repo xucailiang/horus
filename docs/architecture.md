@@ -64,7 +64,12 @@ content hashes do not independently authenticate a human reviewer.
 `start_run` registers a request ID and parameter digest before spawning a Worker.
 The same request returns the same run; conflicting parameters are rejected.
 One active run holds a project lease; separate projects may run concurrently.
-Functional cases currently run in sequence. Load uses fixed k6 VUs and iterations.
+Consecutive functional cases use a shared queue with the reviewed limit of one or
+two consumers. Each case has its own context and retains its slot through cleanup;
+an ordinary check failure does not stop an independent case. Reports keep plan order,
+case start/finish times, and observed peak concurrency. A performance case waits
+for the previous group, runs exclusively through cleanup, then releases the next
+group. Load uses fixed k6 VUs and iterations.
 Polling repeats only explicitly declared read operations within fixed attempt and
 time limits. Typed predicates inspect prior variables and the current response;
 status guards apply to every attempt, final assertions and captures to completion.
@@ -75,8 +80,9 @@ keeps its identity scope across those paths. Reports distinguish unselected step
 from passes, and recovery follows the persisted selection rather than rerouting.
 
 Closing an MCP connection does not stop a Worker. Ordinary cancellation stops new
-business actions and terminates active load. An in-flight bounded HTTP request can
-finish so successful writes can be captured before independent bounded cleanup.
+business actions and terminates active load and polls. In-flight bounded HTTP
+requests in sibling cases can finish so successful writes can be captured before
+independent bounded cleanup. Cases that never started send no cleanup requests.
 
 Each engine has a small guardian. A pipe links it to the Worker; Worker death
 closes the pipe and stops the engine. The guardian retains the project lease until
@@ -127,8 +133,8 @@ verdict. horus does not implement an SSH service or remote monitoring agent.
 
 ## Current limits
 
-HTTP/load/poll/branch steps and identity profiles are implemented. Parallel
-functional cases remain development work. Common Swagger UI discovery
+HTTP/load/poll/branch steps, identity profiles, and bounded functional case
+parallelism are implemented. Common Swagger UI discovery
 patterns are supported; arbitrary dynamic pages and external schema references
 may require a direct, self-contained API definition.
 

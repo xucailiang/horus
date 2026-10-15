@@ -3,6 +3,7 @@ import json
 import os
 import time
 import xml.etree.ElementTree as ET
+from itertools import groupby
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from horus.adapters.k6 import K6Adapter
 from horus.adapters.process import check_engine
 from horus.core.models import (
     BranchStep,
+    Case,
     HttpStep,
     LoadStep,
     Plan,
@@ -94,6 +96,13 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
         "Coverage is limited to the cases and checks below.",
         "",
     ]
+    if scheduling := result.get("scheduling"):
+        lines.extend([
+            f"Functional cases: peak {scheduling['peakFunctionalCases']}, "
+            f"approved limit {scheduling['functionalCaseLimit']} (including cleanup).",
+            "Performance cases run exclusively; functional concurrency is not load evidence.",
+            "",
+        ])
     suite = ET.Element("testsuite", name="horus")
     if result.get("cleanupFrom"):
         lines.extend(
@@ -225,8 +234,11 @@ class Runner:
         self.ledger: list[dict[str, Any]] = []
         self.cancelled = False
         self.phase = "queued"
-        self.active_load = False
-        self.active_poll = False
+        self.active_load: set[asyncio.Task[Any]] = set()
+        self.active_poll: set[asyncio.Task[Any]] = set()
+        self.case_phases: dict[str, str] = {}
+        self.active_functional_cases = 0
+        self.peak_functional_cases = 0
         self.deadline = float("inf")
 
     def context(
@@ -242,6 +254,15 @@ class Runner:
     def state(self, status: str) -> None:
         self.phase = status
         atomic_write(self.root / "state.json", {**self.intent, "status": status})
+
+    def request_cancel(self) -> None:
+        self.cancelled = True
+        for task in self.active_load | self.active_poll:
+            task.cancel()
+
+    def refresh_phase(self) -> None:
+        self.state("running" if "running" in self.case_phases.values() or not self.case_phases
+                   else "cleaning")
 
     def event(self, event: dict[str, Any]) -> dict[str, Any]:
         # Redact runtime payloads, preserving trusted control fields used for verdicts and refs.
@@ -326,6 +347,9 @@ class Runner:
         case_id: str,
         cleanup: bool = False,
     ) -> dict[str, Any]:
+        if not cleanup and (self.cancelled or time.monotonic() >= self.deadline):
+            return self.skipped_step(step, case_id, step.id, status="blocked",
+                                     reason="cancelled" if self.cancelled else "run_timeout")
         if isinstance(step, PollStep):
             return await self.poll(step, context, case_id=case_id)
         if isinstance(step, BranchStep):
@@ -353,7 +377,9 @@ class Runner:
             self.ledger.append(entry)
             self.persist_ledger()
             if isinstance(step, LoadStep):
-                self.active_load = True
+                task = asyncio.current_task()
+                assert task is not None
+                self.active_load.add(task)
                 try:
                     result = await K6Adapter().run(
                         operation,
@@ -369,7 +395,7 @@ class Runner:
                         ),
                     )
                 finally:
-                    self.active_load = False
+                    self.active_load.discard(task)
                 record.update(result)
                 entry["state"] = "confirmed"
             else:
@@ -429,7 +455,9 @@ class Runner:
         if http.identityRef is not None:
             record["identityRef"] = http.identityRef
         started = time.monotonic()
-        self.active_poll = True
+        task = asyncio.current_task()
+        assert task is not None
+        self.active_poll.add(task)
         try:
             values = context.view(http.identityRef)
             if not set(http.requires).issubset(values["vars"]):
@@ -498,7 +526,7 @@ class Runner:
             record.update(status="error", reason=exc.code if isinstance(exc, HorusError)
                           else type(exc).__name__)
         finally:
-            self.active_poll = False
+            self.active_poll.discard(task)
         record["pollElapsedMs"] = (time.monotonic() - started) * 1000
         return self.event(record)
 
@@ -595,37 +623,83 @@ class Runner:
         self.deadline = deadline
         if self.intent.get("cleanupFrom"):
             return await self.repair(result, deadline)
-        for case in self.plan.cases:
-            output: dict[str, Any] = {"id": case.id, "steps": [], "cleanup": []}
-            result["cases"].append(output)
-            context = self.context()
-            blocked = self.cancelled or time.monotonic() >= deadline
-            self.state("running")
-            try:
-                for step in case.steps:
-                    if blocked or self.cancelled or time.monotonic() >= deadline:
-                        output["steps"].append(
-                            self.event({"caseId": case.id, "id": step.id, "status": "blocked"})
-                        )
-                        continue
-                    action = await asyncio.wait_for(
-                        self.step(step, context, case_id=case.id),
-                        max(0.001, deadline - time.monotonic()),
-                    )
-                    output["steps"].append(action)
-                    blocked = action["status"] in {"failed", "error", "blocked"}
-            except asyncio.CancelledError:
-                self.cancelled = True
-                output["steps"].append(
-                    self.event({"caseId": case.id, "id": "cancelled", "status": "inconclusive"})
-                )
-            except TimeoutError:
-                output["steps"].append(
-                    self.event({"caseId": case.id, "id": "timeout", "status": "inconclusive"})
-                )
-            finally:
-                output["cleanup"] = await self.cleanup_steps(case.id, case.cleanup, context)
+        result["cases"] = [{"id": case.id, "steps": [], "cleanup": []} for case in self.plan.cases]
+        self.state("running")
+        for kind, group in groupby(enumerate(self.plan.cases), key=lambda item: item[1].kind):
+            cases = [(case, result["cases"][index]) for index, case in group]
+            limit = (
+                self.config.policy.limits.maxFunctionalParallelCases if kind == "functional" else 1
+            )
+            await self.run_cases(cases, limit)
         return self.finish(result)
+
+    async def run_cases(self, cases: list[tuple[Case, dict[str, Any]]], limit: int) -> None:
+        pending = iter(cases)
+
+        async def consume() -> None:
+            for case, output in pending:
+                try:
+                    await self.run_case(case, output)
+                except BaseException:
+                    self.request_cancel()
+                    raise
+
+        # Shield sibling writes and cleanup from cancellation of the scheduling task.
+        group = asyncio.gather(*(consume() for _ in range(min(limit, len(cases)))),
+                               return_exceptions=True)
+        try:
+            results = await asyncio.shield(group)
+        except asyncio.CancelledError:
+            self.request_cancel()
+            results = await group
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+
+    async def run_case(self, case: Case, output: dict[str, Any]) -> None:
+        if self.cancelled or time.monotonic() >= self.deadline:
+            output["steps"] = [self.skipped_step(step, case.id, step.id, status="blocked",
+                                                reason="case_not_started") for step in case.steps]
+            output["cleanup"] = [self.skipped_step(step, case.id, step.id,
+                                                  reason="case_not_started")
+                                 for step in case.cleanup]
+            return
+        output["startedAt"] = time.time()
+        self.case_phases[case.id] = "running"
+        self.refresh_phase()
+        if case.kind == "functional":
+            self.active_functional_cases += 1
+            self.peak_functional_cases = max(
+                self.peak_functional_cases, self.active_functional_cases
+            )
+        context = self.context()
+        blocked = False
+        try:
+            for step in case.steps:
+                if blocked or self.cancelled or time.monotonic() >= self.deadline:
+                    output["steps"].append(self.skipped_step(
+                        step, case.id, step.id, status="blocked", reason="upstream_blocked"))
+                    continue
+                result = await asyncio.wait_for(self.step(step, context, case_id=case.id),
+                                                max(0.001, self.deadline - time.monotonic()))
+                output["steps"].append(result)
+                blocked = result["status"] in {"failed", "error", "blocked"}
+        except asyncio.CancelledError:
+            self.cancelled = True
+            output["steps"].append(self.event({"caseId": case.id, "id": "cancelled",
+                                                "status": "inconclusive"}))
+        except TimeoutError:
+            output["steps"].append(self.event({"caseId": case.id, "id": "timeout",
+                                                "status": "inconclusive"}))
+        finally:
+            try:
+                output["cleanup"] = await self.cleanup_steps(case.id, case.cleanup, context)
+            finally:
+                self.case_phases.pop(case.id, None)
+                if case.kind == "functional":
+                    self.active_functional_cases -= 1
+                output["finishedAt"] = time.time()
+                self.refresh_phase()
 
     async def cleanup_steps(
         self,
@@ -633,10 +707,19 @@ class Runner:
         steps: list[HttpStep],
         context: CaseContext,
     ) -> list[dict[str, Any]]:
-        self.state("cleaning")
-        deadline = time.monotonic() + self.config.policy.limits.maxCleanupDurationMs / 1000
+        if case_id in self.case_phases:
+            self.case_phases[case_id] = "cleaning"
+            self.refresh_phase()
+        else:
+            self.state("cleaning")
+        budget = self.config.policy.limits.maxCleanupDurationMs / 1000
+        deadline = min(time.monotonic() + budget, self.deadline + budget)
         actions = []
         for step in steps:
+            if time.monotonic() >= deadline:
+                actions.append(self.event({"id": step.id, "caseId": case_id, "status": "failed",
+                                           "reason": "cleanup_timeout"}))
+                continue
             try:
                 action = await asyncio.wait_for(
                     self.step(step, context, case_id=case_id, cleanup=True),
@@ -842,6 +925,12 @@ class Runner:
         return self.finish(result)
 
     def finish(self, result: dict[str, Any]) -> dict[str, Any]:
+        if not self.intent.get("cleanupFrom"):
+            result["scheduling"] = {
+                "functionalCaseLimit": self.config.policy.limits.maxFunctionalParallelCases,
+                "peakFunctionalCases": self.peak_functional_cases,
+                "performanceCasesExclusive": True,
+            }
         result["status"] = "cancelled" if self.cancelled else "completed"
         result["ledger"] = self.safe_ledger()
         self.state("reporting")
