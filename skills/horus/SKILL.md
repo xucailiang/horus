@@ -64,6 +64,9 @@ marked `secret=true`; that marker redacts and omits its ledger value. Do not reu
 another account's credential capture. Show these selections during review.
 
 Negative cases need explicit error expectations. HTTP 200 alone is not a data pass.
+`jsonSchema` checks the whole body and needs `dialect`; it cannot share an assertion
+with `status`, `jsonPointer`, `header`, or `elapsedMs`. For array membership, use
+`dialect=2020-12` (or `oas31`) with `contains` so one item has all required values together.
 Use `kind=poll` for asynchronous progress, with `requestStep` (an HTTP exercise step),
 `until`, `intervalMs`, `maxAttempts`, and `timeoutMs`. The operation must be explicitly
 declared read-only in `pollAllow` and also allowed in `runAllow`; method alone is not

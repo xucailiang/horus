@@ -178,7 +178,12 @@ class Assertion(Model):
     jsonPointer: JsonPointer | None = None
     header: str | None = None
     elapsedMs: bool = False
-    jsonSchema: dict[str, JsonValue] | None = None
+    jsonSchema: dict[str, JsonValue] | None = Field(
+        default=None,
+        description="Validate the whole response body. Requires dialect; do not also set "
+        "jsonPointer, status, header or elapsedMs. For array membership, use contains "
+        "with dialect 2020-12 or oas31.",
+    )
     dialect: Literal["2020-12", "draft4", "oas30", "oas31"] | None = None
     operator: Literal["eq", "ne", "exists", "type", "length", "gte", "lte", "regex"] = "eq"
     expected: JsonValue = None

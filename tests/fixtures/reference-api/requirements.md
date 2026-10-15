@@ -7,7 +7,8 @@ Creating a record requires a string name and an integer value. It returns 201 wi
 the generated id and the submitted fields. Each test run must create isolated data.
 
 Reading a record returns 200 and the exact value submitted at creation. HTTP 200
-with a different value is a data failure. List results preserve the same fields.
+with a different value is a data failure. GET /records returns an array of records
+with the same fields and values; the order is not guaranteed.
 
 Deleting an existing record returns 204. A subsequent detail read returns 404.
 Always delete created records and revoke the session even after a data assertion fails.

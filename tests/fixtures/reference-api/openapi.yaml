@@ -63,7 +63,13 @@ paths:
       operationId: listRecords
       security: [{bearer: []}]
       responses:
-        '200': {description: List of records with original fields}
+        '200':
+          description: List of records with original fields
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Record'}
   /records/{id}:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string}}
