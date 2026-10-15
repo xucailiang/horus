@@ -318,6 +318,24 @@ class PredicateNot(Model):
 Predicate = Annotated[Comparison | PredicateGroup | PredicateNot, Field(discriminator="kind")]
 
 
+def check_predicate(predicate: Predicate, *, response: bool) -> None:
+    pending: list[tuple[Predicate, int]] = [(predicate, 1)]
+    count = 0
+    while pending:
+        item, depth = pending.pop()
+        count += 1
+        if count > 64 or depth > 8:
+            raise ValueError("Predicate is limited to 64 nodes and depth 8")
+        if isinstance(item, PredicateGroup):
+            pending.extend((child, depth + 1) for child in item.predicates)
+        elif isinstance(item, PredicateNot):
+            pending.append((item.predicate, depth + 1))
+        elif not response and any(
+            isinstance(op, ResponseOperand) for op in (item.left, item.right)
+        ):
+            raise ValueError("Branch predicates can only read literals and prior variables")
+
+
 class PollStep(Model):
     """Observe an explicitly allowed read operation, then capture and assert its final response.
 
@@ -341,21 +359,34 @@ class PollStep(Model):
             raise ValueError(
                 "A polling request observes progress; it cannot authenticate or prepare"
             )
-        pending: list[tuple[Predicate, int]] = [(self.until, 1)]
-        count = 0
-        while pending:
-            predicate, depth = pending.pop()
-            count += 1
-            if count > 64 or depth > 8:
-                raise ValueError("Predicate is limited to 64 nodes and depth 8")
-            if isinstance(predicate, PredicateGroup):
-                pending.extend((child, depth + 1) for child in predicate.predicates)
-            elif isinstance(predicate, PredicateNot):
-                pending.append((predicate.predicate, depth + 1))
+        check_predicate(self.until, response=True)
         return self
 
 
-Step = HttpStep | LoadStep | PollStep
+class BranchOutput(Model):
+    name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    identityRef: str | None = None
+
+
+class BranchStep(Model):
+    kind: Literal["branch"]
+    id: str
+    predicate: Predicate
+    identityRef: str | None = None
+    thenSteps: list["Step"]
+    elseSteps: list["Step"]
+    outputs: list[BranchOutput]
+
+    @model_validator(mode="after")
+    def bounded_condition(self) -> Self:
+        check_predicate(self.predicate, response=False)
+        keys = {(output.identityRef, output.name) for output in self.outputs}
+        if len(keys) != len(self.outputs):
+            raise ValueError("Duplicate branch output")
+        return self
+
+
+Step = HttpStep | LoadStep | PollStep | BranchStep
 
 
 class Case(Model):
@@ -363,6 +394,19 @@ class Case(Model):
     kind: Literal["functional", "performance"]
     steps: list[Step] = Field(min_length=1)
     cleanup: list[HttpStep]
+
+    @model_validator(mode="after")
+    def bounded_steps(self) -> Self:
+        pending: list[tuple[Step, int]] = [(step, 1) for step in self.steps]
+        count = len(self.cleanup)
+        while pending:
+            step, depth = pending.pop()
+            count += 1
+            if count > 2000 or depth > 8:
+                raise ValueError("A case is limited to 2000 steps and depth 8")
+            if isinstance(step, BranchStep):
+                pending.extend((child, depth + 1) for child in [*step.thenSteps, *step.elseSteps])
+        return self
 
 
 class SupportingContext(Model):

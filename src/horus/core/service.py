@@ -11,11 +11,9 @@ import yaml
 from openapi_spec_validator import validate
 
 from horus.adapters.openapi import load_api
-from horus.core.models import HttpStep, LoadStep, Plan, PollStep, ProjectConfig, VariableOperand
-from horus.core.predicates import comparisons
+from horus.core.models import Plan, ProjectConfig
 from horus.core.store import AssetStore, HorusError, atomic_write, canonical, digest, file_lock
-
-VARIABLE = re.compile(r"(?<!\$)\$\{(vars|secrets|run)\.([A-Za-z_][A-Za-z0-9_]*)\}")
+from horus.core.validation import FlowValidator
 
 
 class Service:
@@ -236,117 +234,13 @@ class Service:
             for profile in profiles.values():
                 if not set(profile.credentialRefs.values()).issubset(env.secretBindings):
                     raise HorusError("missing_identity_binding", profile.id)
-        case_ids: set[str] = set()
-        assertion_refs: set[str] = set()
-        capture_refs: set[str] = set()
-        step_refs: set[str] = set()
-        max_requests = 0
-        declared_duration_ms = 0
-        for case in plan.cases:
-            if case.id in case_ids:
-                raise HorusError("duplicate_case", case.id)
-            case_ids.add(case.id)
-            known: set[str] = set()
-            private: dict[str | None, set[str]] = {}
-            private_names: set[str] = set()
-            public_names: set[str] = set()
-            for node in [*case.steps, *case.cleanup]:
-                http = node.requestStep if isinstance(node, PollStep) else node
-                if isinstance(http, HttpStep):
-                    for name, capture in http.captures.items():
-                        (private_names if capture.private else public_names).add(name)
-            if private_names.intersection(public_names):
-                raise HorusError("ambiguous_variable_scope", case.id)
-            prior: set[str] = set()
-            for node in [*case.steps, *case.cleanup]:
-                step = node.requestStep if isinstance(node, PollStep) else node
-                location = f"{case.id}.{node.id}"
-                if node.id in prior or step.operationId not in operations:
-                    raise HorusError("invalid_step", location)
-                step_refs.add(location)
-                if step.identityRef is not None and step.identityRef not in profiles:
-                    raise HorusError("unknown_identity", location)
-                visible = known | private.get(step.identityRef, set())
-                if isinstance(node, PollStep):
-                    for condition in comparisons(node.until):
-                        for operand in (condition.left, condition.right):
-                            if isinstance(operand, VariableOperand) and operand.name not in visible:
-                                raise HorusError("missing_variable_source", location)
-                    if config and step.operationId not in config.policy.pollAllow:
-                        raise HorusError("poll_operation_denied", location)
-                    declared_duration_ms += node.timeoutMs
-                request_json = step.request.model_dump_json()
-                if re.search(r"\{\{[A-Za-z_][A-Za-z0-9_]*\}\}", request_json):
-                    raise HorusError(
-                        "unsupported_variable_syntax",
-                        f"{location}: use ${{vars.name}} or ${{secrets.binding}}; "
-                        "double braces are unsupported",
-                    )
-                for expression in re.findall(r"(?<!\$)\$\{[^}]+\}", request_json):
-                    if not VARIABLE.fullmatch(expression):
-                        raise HorusError("unsupported_variable_syntax", location)
-                captured = set(step.captures) if isinstance(step, HttpStep) else set()
-                for data, available in [
-                    (request_json, visible),
-                    (
-                        json.dumps([a.model_dump(mode="json") for a in step.assertions]),
-                        visible | captured,
-                    ),
-                ]:
-                    for namespace, name in VARIABLE.findall(data):
-                        if namespace == "vars" and name not in available:
-                            raise HorusError("missing_variable_source", f"{location}: {name}")
-                        if namespace == "run" and name != "id":
-                            raise HorusError("unknown_run_variable", name)
-                        if namespace == "secrets":
-                            bindings = (
-                                profiles[step.identityRef].credentialRefs
-                                if step.identityRef is not None
-                                else env.secretBindings
-                                if env
-                                else None
-                            )
-                            if bindings is not None and name not in bindings:
-                                raise HorusError("missing_secret_binding", f"{location}: {name}")
-                cleanup = node in case.cleanup
-                if config:
-                    allowed = config.policy.cleanupAllow if cleanup else config.policy.runAllow
-                    if step.operationId not in allowed:
-                        raise HorusError("operation_denied", location)
-                for assertion in step.assertions:
-                    ref = f"{location}.{assertion.id}"
-                    if ref in assertion_refs:
-                        raise HorusError("duplicate_assertion", ref)
-                    assertion_refs.add(ref)
-                    if isinstance(step, LoadStep) and (assertion.jsonSchema or assertion.elapsedMs):
-                        raise HorusError("unsupported_load_assertion", ref)
-                if isinstance(step, HttpStep):
-                    if not set(step.dependsOn).issubset(prior):
-                        raise HorusError("invalid_dependency", location)
-                    if not set(step.requires).issubset(visible):
-                        raise HorusError("unknown_cleanup_variable", location)
-                    for name, capture in step.captures.items():
-                        if capture.private:
-                            private.setdefault(step.identityRef, set()).add(name)
-                        else:
-                            known.add(name)
-                    capture_refs.update(f"{location}.{name}" for name in step.captures)
-                    max_requests += node.maxAttempts if isinstance(node, PollStep) else 1
-                else:
-                    if case.kind != "performance":
-                        raise HorusError("load_requires_performance_case", location)
-                    max_requests += step.loadProfile.iterations
-                    declared_duration_ms += step.loadProfile.maxDurationMs
-                    if config:
-                        limits = config.policy.limits
-                        if (
-                            step.operationId not in config.policy.loadAllow
-                            or step.loadProfile.vus > limits.maxVus
-                            or step.loadProfile.iterations > limits.maxLoadIterations
-                            or step.loadProfile.maxDurationMs > limits.maxLoadDurationMs
-                        ):
-                            raise HorusError("load_budget_exceeded", location)
-                prior.add(node.id)
+        execution = FlowValidator(plan, operations, config, env).validate()
+        case_ids = execution.case_ids
+        assertion_refs = execution.assertion_refs
+        capture_refs = execution.capture_refs
+        step_refs = execution.step_refs
+        max_requests = execution.max_requests
+        declared_duration_ms = execution.declared_duration_ms
         understanding = plan.businessUnderstanding
         for claim in [*understanding.flows, *understanding.rules]:
             if not set(claim.operationIds).issubset(operations):

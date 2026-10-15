@@ -24,11 +24,30 @@ def comparisons(predicate: Predicate) -> Iterator[Comparison]:
         yield from comparisons(predicate.predicate)
 
 
-def operand_value(operand: Operand, variables: dict[str, Any], response: Response) -> Any:
+def guaranteed_variables(predicate: Predicate, truth: bool) -> set[str]:
+    if isinstance(predicate, PredicateNot):
+        return guaranteed_variables(predicate.predicate, not truth)
+    if isinstance(predicate, PredicateGroup):
+        if (predicate.kind == "all" and truth) or (predicate.kind == "any" and not truth):
+            return set().union(*(guaranteed_variables(p, truth) for p in predicate.predicates))
+    elif (
+        predicate.operator == "exists"
+        and isinstance(predicate.left, VariableOperand)
+        and isinstance(predicate.right, LiteralOperand)
+        and type(predicate.right.value) is bool
+        and truth == predicate.right.value
+    ):
+        return {predicate.left.name}
+    return set()
+
+
+def operand_value(operand: Operand, variables: dict[str, Any], response: Response | None) -> Any:
     if isinstance(operand, LiteralOperand):
         return operand.value
     if isinstance(operand, VariableOperand):
         return variables.get(operand.name, MISSING)
+    if response is None:
+        raise HorusError("predicate_response_unavailable")
     if operand.jsonPointer is not None:
         return pointer(response.body, operand.jsonPointer)
     if operand.header is not None:
@@ -39,7 +58,7 @@ def operand_value(operand: Operand, variables: dict[str, Any], response: Respons
 def evaluate(
     predicate: Predicate,
     variables: dict[str, Any],
-    response: Response,
+    response: Response | None = None,
     observations: list[dict[str, Any]] | None = None,
 ) -> bool:
     if isinstance(predicate, PredicateNot):

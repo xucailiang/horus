@@ -10,6 +10,7 @@ from horus.adapters.hurl import MISSING, HurlAdapter, Response, pointer
 from horus.adapters.k6 import K6Adapter
 from horus.adapters.process import check_engine
 from horus.core.models import (
+    BranchStep,
     HttpStep,
     LoadStep,
     Plan,
@@ -21,13 +22,40 @@ from horus.core.models import (
 )
 from horus.core.predicates import evaluate
 from horus.core.resources import resource_summary
-from horus.core.service import VARIABLE, Service
+from horus.core.service import Service
+from horus.core.steps import request_action, selected_steps, walk_steps
 from horus.core.store import HorusError, atomic_write, file_lock
-from horus.core.values import CaseContext, Redactor, resolve
+from horus.core.values import VARIABLE, CaseContext, Redactor, resolve
+
+
+def result_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [entry for step in steps for entry in [step, *result_steps(step.get("steps", []))]]
+
+
+def collapse_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    covered = {(parent["caseId"], child["id"])
+               for parent in events if parent.get("kind") == "branch"
+               for child in result_steps(parent.get("steps", []))}
+    completed = {(event["caseId"], event["id"])
+                 for event in events if event.get("kind") == "branch"}
+    return [event for event in events if (event.get("caseId"), event["id"]) not in covered
+            and not (event.get("kind") == "branch-selection" and
+                     (event["caseId"], event["id"]) in completed)]
+
+
+def recorded_events(root: Path) -> list[dict[str, Any]]:
+    events = []
+    if (root / "events.jsonl").exists():
+        for line in (root / "events.jsonl").read_text().splitlines():
+            try:
+                events.append(json.loads(line))
+            except ValueError:
+                break  # A trailing partial record is possible after a hard kill.
+    return events
 
 
 def verdict(cases: list[dict[str, Any]]) -> str:
-    steps = [step for case in cases for step in [*case["steps"], *case["cleanup"]]]
+    steps = [step for case in cases for step in result_steps([*case["steps"], *case["cleanup"]])]
     states = [step["status"] for step in steps if step["status"] != "observed"]
     for status, result in [
         ("error", "error"),
@@ -39,7 +67,7 @@ def verdict(cases: list[dict[str, Any]]) -> str:
             return result
     if any(step.get("reason") == "missing_cleanup_inputs" for step in steps):
         return "inconclusive"
-    return "passed" if states else "inconclusive"
+    return "passed" if "passed" in states else "inconclusive"
 
 
 def assertion_status(checks: list[dict[str, Any]]) -> str:
@@ -75,9 +103,14 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
     failures = 0
     for case in result["cases"]:
         lines.extend([f"## {case['id']}", ""])
-        for step in [*case["steps"], *case["cleanup"]]:
-            if step.get("kind") == "poll-attempt":
-                lines.append(f"- {step['id']}: observation {step['attempt']}")
+        for step in result_steps([*case["steps"], *case["cleanup"]]):
+            if step.get("kind") in {"poll-attempt", "branch-selection"}:
+                lines.append(f"- {step['id']}: observation")
+                continue
+            if step.get("kind") == "branch" and step["status"] not in {"error", "blocked"}:
+                lines.extend([f"- {step['id']}: {step.get('selected', step.get('reason'))}", "",
+                              "```json", json.dumps(step.get("conditions", []), indent=2),
+                              "```", ""])
                 continue
             count += 1
             identity = f" ({step['identityRef']})" if step.get("identityRef") is not None else ""
@@ -93,7 +126,7 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
                 ET.SubElement(node, "skipped", message=step["status"])
             if "metrics" in step:
                 lines.extend(["", "```json", json.dumps(step["metrics"], indent=2), "```", ""])
-            if step.get("kind") == "poll":
+            if step.get("kind") == "poll" and "observations" in step:
                 observations = json.dumps(step["observations"], indent=2)
                 lines.extend(["", f"Polling: {step['attempts']} attempts", "",
                               "```json", observations, "```", ""])
@@ -147,13 +180,7 @@ def interrupted_report(service: Service, project_ref: str, run_id: str) -> dict[
     root = Runs(service).root(project_ref, run_id)
     with file_lock(root / ".recover.lock"):
         intent = json.loads((root / "intent.json").read_bytes())
-        events = []
-        if (root / "events.jsonl").exists():
-            for line in (root / "events.jsonl").read_text().splitlines():
-                try:
-                    events.append(json.loads(line))
-                except ValueError:
-                    break  # A trailing partial record is possible after a hard kill.
+        events = recorded_events(root)
         return write_report(
             service,
             root,
@@ -164,7 +191,7 @@ def interrupted_report(service: Service, project_ref: str, run_id: str) -> dict[
                     {
                         "id": "interrupted",
                         "steps": [
-                            *events,
+                            *collapse_events(events),
                             {
                                 "id": "interruption",
                                 "status": "inconclusive",
@@ -200,6 +227,7 @@ class Runner:
         self.phase = "queued"
         self.active_load = False
         self.active_poll = False
+        self.deadline = float("inf")
 
     def context(
         self, run_id: str | None = None, *, shared: dict[str, Any] | None = None
@@ -300,6 +328,8 @@ class Runner:
     ) -> dict[str, Any]:
         if isinstance(step, PollStep):
             return await self.poll(step, context, case_id=case_id)
+        if isinstance(step, BranchStep):
+            return await self.branch(step, context, case_id=case_id)
         record: dict[str, Any] = {"caseId": case_id, "id": step.id, "status": "error"}
         entry: dict[str, Any] = {
             "caseId": case_id,
@@ -315,7 +345,8 @@ class Runner:
             values = context.view(step.identityRef)
             if isinstance(step, HttpStep) and not set(step.requires).issubset(values["vars"]):
                 return self.event(
-                    {**record, "status": "skipped", "reason": "missing_cleanup_inputs"}
+                    {**record, "status": "skipped", "reason": "missing_cleanup_inputs"
+                     if cleanup else "condition_not_met"}
                 )
             request = Request.model_validate(resolve(step.request.model_dump(mode="json"), values))
             operation = self.operations[step.operationId]
@@ -401,6 +432,8 @@ class Runner:
         self.active_poll = True
         try:
             values = context.view(http.identityRef)
+            if not set(http.requires).issubset(values["vars"]):
+                return self.event({**record, "status": "skipped", "reason": "condition_not_met"})
             request = Request.model_validate(resolve(http.request.model_dump(mode="json"), values))
             record["request"] = request.model_dump(mode="json")
             async with asyncio.timeout(step.timeoutMs / 1000):
@@ -469,6 +502,76 @@ class Runner:
         record["pollElapsedMs"] = (time.monotonic() - started) * 1000
         return self.event(record)
 
+    def skipped_step(
+        self, step: Step, case_id: str, path: str, *, reason: str = "not_selected",
+        status: str = "skipped",
+    ) -> dict[str, Any]:
+        record: dict[str, Any] = {"caseId": case_id, "id": path, "kind": step.kind,
+                                  "status": status, "reason": reason}
+        identity = (
+            step.identityRef if isinstance(step, BranchStep) else request_action(step).identityRef
+        )
+        if identity is not None:
+            record["identityRef"] = identity
+        if isinstance(step, BranchStep):
+            record["steps"] = [self.skipped_step(child, case_id, path + "." + side + "." + child.id,
+                                                 reason=reason, status=status)
+                               for side, children in (
+                                   ("then", step.thenSteps), ("else", step.elseSteps))
+                               for child in children]
+        return self.event(record)
+
+    async def branch(
+        self, step: BranchStep, context: CaseContext, *, case_id: str,
+    ) -> dict[str, Any]:
+        record: dict[str, Any] = {"caseId": case_id, "id": step.id, "kind": "branch",
+                                  "status": "error", "conditions": [], "steps": []}
+        if step.identityRef is not None:
+            record["identityRef"] = step.identityRef
+        try:
+            matched = evaluate(step.predicate, context.view(step.identityRef)["vars"],
+                               observations=record["conditions"])
+            selected = "then" if matched else "else"
+            record["selected"] = selected
+            self.event({**record, "kind": "branch-selection", "status": "observed"})
+            children = step.thenSteps if matched else step.elseSteps
+            other = step.elseSteps if matched else step.thenSteps
+            skipped = [self.skipped_step(child, case_id, step.id + "." +
+                                        ("else" if matched else "then") + "." + child.id)
+                       for child in other]
+            blocked = False
+            active_path = step.id
+            remaining = iter(children)
+            for child in remaining:
+                active_path = step.id + "." + selected + "." + child.id
+                if blocked or self.cancelled or time.monotonic() >= self.deadline:
+                    result = self.skipped_step(child, case_id, active_path,
+                                               reason="upstream_blocked", status="blocked")
+                else:
+                    result = await self.step(child.model_copy(update={"id": active_path}),
+                                             context, case_id=case_id)
+                record["steps"].append(result)
+                blocked = result["status"] in {"failed", "error", "blocked", "inconclusive"}
+            if not record["steps"] or all(s["status"] == "skipped" for s in record["steps"]):
+                record.update(status="skipped", reason="no_selected_checks")
+            else:
+                record["status"] = verdict([{"steps": record["steps"], "cleanup": []}])
+            record["steps"].extend(skipped)
+        except asyncio.CancelledError:
+            record["steps"].append(self.event({"caseId": case_id, "id": active_path,
+                                                "status": "inconclusive", "reason": "interrupted"}))
+            record.update(status="inconclusive",
+                          reason="cancelled" if self.cancelled else "timeout")
+            record["steps"].extend(self.skipped_step(
+                child, case_id, step.id + "." + selected + "." + child.id,
+                reason="upstream_blocked", status="blocked")
+                for child in remaining)
+            record["steps"].extend(skipped)
+        except (HorusError, ValueError) as exc:
+            record.update(status="error", reason=exc.code if isinstance(exc, HorusError)
+                          else type(exc).__name__)
+        return self.event(record)
+
     async def execute(self) -> dict[str, Any]:
         self.service.review_gate(
             self.project_ref,
@@ -478,7 +581,8 @@ class Runner:
         )
         versions = {"hurl": await check_engine("hurl")}
         if not self.intent.get("cleanupFrom") and any(
-            isinstance(step, LoadStep) for case in self.plan.cases for step in case.steps
+            isinstance(step, LoadStep)
+            for case in self.plan.cases for _, step in walk_steps(case.steps)
         ):
             versions["k6"] = await check_engine("k6")
         result: dict[str, Any] = {
@@ -488,6 +592,7 @@ class Runner:
             "cases": [],
         }
         deadline = time.monotonic() + self.config.policy.limits.maxRunDurationMs / 1000
+        self.deadline = deadline
         if self.intent.get("cleanupFrom"):
             return await self.repair(result, deadline)
         for case in self.plan.cases:
@@ -498,7 +603,7 @@ class Runner:
             self.state("running")
             try:
                 for step in case.steps:
-                    if blocked or self.cancelled:
+                    if blocked or self.cancelled or time.monotonic() >= deadline:
                         output["steps"].append(
                             self.event({"caseId": case.id, "id": step.id, "status": "blocked"})
                         )
@@ -563,6 +668,12 @@ class Runner:
             if (root / "ledger.json").exists()
             else []
         )
+        selections = {
+            (step["caseId"], step["id"]): step["selected"]
+            for step in recorded_events(root)
+            if step.get("kind") == "branch-selection"
+            and step.get("selected") in {"then", "else"}
+        }
         result["residue"] = [
             {**entry, "reason": "original_write_outcome_unknown"}
             for entry in ledger
@@ -612,8 +723,9 @@ class Runner:
             )
             private_names = {
                 name
-                for step in [*case.steps, *case.cleanup]
-                for http in [step.requestStep if isinstance(step, PollStep) else step]
+                for _, node in walk_steps([*case.steps, *case.cleanup])
+                if not isinstance(node, BranchStep)
+                for http in [request_action(node)]
                 if isinstance(http, HttpStep)
                 for name, capture in http.captures.items()
                 if capture.private
@@ -634,7 +746,13 @@ class Runner:
             }
             required_steps = {name for step in case.cleanup for name in step.dependsOn}
             authentication = []
-            for step in reversed(case.steps):
+            executed = list(selected_steps(case.steps, {
+                path: side for (case_id, path), side in selections.items() if case_id == case.id
+            }))
+            for path, node in reversed(executed):
+                if not isinstance(node, HttpStep):
+                    continue
+                step = node.model_copy(update={"id": path})
                 if not (
                     isinstance(step, HttpStep)
                     and step.role == "authentication"

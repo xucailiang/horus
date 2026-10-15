@@ -5,8 +5,9 @@ from typing import Any
 from urllib.parse import quote
 
 from horus.core.models import Capture, IdentityProfile
-from horus.core.service import VARIABLE
 from horus.core.store import HorusError
+
+VARIABLE = re.compile(r"(?<!\$)\$\{(vars|secrets|run)\.([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
 @dataclass
