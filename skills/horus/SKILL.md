@@ -44,6 +44,9 @@ Dynamic values use `${vars.name}`, `${secrets.binding}`, and `${run.id}`.
 A whole placeholder preserves its JSON type; `$${...}` is a literal escape.
 Do not use `{{name}}`. Coverage references must be fully qualified:
 `caseId.stepId.assertionId`, `caseId.stepId.captureName`, and `caseId.stepId`.
+`jsonPointer` and `sourceJsonPointer` use [RFC 6901](https://www.rfc-editor.org/rfc/rfc6901):
+`/id`, `/items/0`, or `""` for the whole body. Escape key characters `~` as `~0` and
+`/` as `~1`. JSONPath such as `$.id` is invalid.
 
 Create isolated data and capture its actual IDs. Declare every dependency and
 finally cleanup. Use capture purpose `authentication` for credentials and

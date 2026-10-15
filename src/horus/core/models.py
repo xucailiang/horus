@@ -9,6 +9,12 @@ class Model(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
+JsonPointer = Annotated[str, Field(
+    pattern=r"^(?:/(?:[^~/]|~[01])*)*$",
+    description='RFC 6901 JSON Pointer: /id, /items/0, or "" for the whole body; not $.id.',
+)]
+
+
 class Limits(Model):
     maxVus: int = Field(default=10, ge=1, le=10)
     maxLoadIterations: int = Field(default=1000, ge=1, le=1000)
@@ -68,7 +74,7 @@ class State(Model):
 class DataDependency(Model):
     id: str
     producer: str
-    sourceJsonPointer: str
+    sourceJsonPointer: JsonPointer
     consumers: list[str]
     purpose: str
     lifecycle: Literal["case"] = "case"
@@ -144,7 +150,7 @@ class Capture(Model):
     Other captures are case data; secret=true redacts them and omits their ledger values.
     """
 
-    jsonPointer: str | None = None
+    jsonPointer: JsonPointer | None = None
     header: str | None = None
     status: bool = False
     secret: bool
@@ -169,7 +175,7 @@ class Assertion(Model):
 
     id: str
     status: int | list[int] | None = None
-    jsonPointer: str | None = None
+    jsonPointer: JsonPointer | None = None
     header: str | None = None
     elapsedMs: bool = False
     jsonSchema: dict[str, JsonValue] | None = None
@@ -283,7 +289,7 @@ class VariableOperand(Model):
 
 class ResponseOperand(Model):
     kind: Literal["response"]
-    jsonPointer: str | None = None
+    jsonPointer: JsonPointer | None = None
     header: str | None = None
     status: bool = False
 
