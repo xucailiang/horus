@@ -59,6 +59,22 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
         try:
             payload = await asyncio.to_thread(action)
         except HorusError as exc:
+            if exc.code == "run_not_finished":
+                return Result(
+                    projectRef=project_ref,
+                    status="blocked",
+                    summary=str(exc),
+                    issues=[
+                        Issue(
+                            code=exc.code,
+                            location="runId",
+                            reason=str(exc),
+                            nextAction="Wait for the existing run to finish, then retry",
+                            needsUserInput=False,
+                        )
+                    ],
+                    nextActions=["horus_get_run", "horus_wait_run"],
+                )
             if exc.code.startswith("review_") or exc.code == "missing_target":
                 return Result(
                     projectRef=project_ref,
@@ -109,7 +125,6 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
                 "executionReady": all(e["status"] == "ready" for e in engines.values()),
                 "gaps": [
                     "identity, branch and poll support are pending",
-                    "repair cleanup is pending",
                     "regular-expression assertions are pending",
                 ],
                 "readRoots": [str(p) for p in service.read_roots],
@@ -274,5 +289,15 @@ def create_server(workspace: Path, read_roots: list[Path] | None = None) -> Fast
     async def horus_cancel_run(projectRef: str, runId: str) -> Result:
         """Request cancellation, followed by bounded cleanup and an automatic report."""
         return await invoke(projectRef, lambda: runs.cancel(projectRef, runId))
+
+    @server.tool()
+    async def horus_cleanup_run(projectRef: str, runId: str, requestId: str) -> Result:
+        """Start a bounded cleanup attempt for a finished original run, without business writes.
+
+        Uses its existing approval, nonsecret ledger values and cleanupAllow only.
+        Reauthentication is allowed only when explicitly approved for cleanup.
+        Lost credentials and unresolved writes stay visible. Retry with the same requestId.
+        """
+        return await invoke(projectRef, lambda: runs.cleanup(projectRef, runId, requestId))
 
     return server

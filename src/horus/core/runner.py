@@ -11,13 +11,14 @@ from horus.adapters.k6 import K6Adapter
 from horus.adapters.process import check_engine
 from horus.core.models import HttpStep, LoadStep, Plan, ProjectConfig, Request, ResourceMetrics
 from horus.core.resources import resource_summary
-from horus.core.service import Service
+from horus.core.service import VARIABLE, Service
 from horus.core.store import HorusError, atomic_write, file_lock
 from horus.core.values import Redactor, resolve
 
 
 def verdict(cases: list[dict[str, Any]]) -> str:
-    states = [step["status"] for case in cases for step in [*case["steps"], *case["cleanup"]]]
+    steps = [step for case in cases for step in [*case["steps"], *case["cleanup"]]]
+    states = [step["status"] for step in steps]
     for status, result in [
         ("error", "error"),
         ("failed", "failed"),
@@ -26,12 +27,16 @@ def verdict(cases: list[dict[str, Any]]) -> str:
     ]:
         if status in states:
             return result
+    if any(step.get("reason") == "missing_cleanup_inputs" for step in steps):
+        return "inconclusive"
     return "passed" if states else "inconclusive"
 
 
 def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[str, Any]:
     result["verdict"] = verdict(result["cases"])
-    if result["status"] in {"cancelled", "interrupted"} and result["verdict"] == "passed":
+    if (result["status"] in {"cancelled", "interrupted"} or result.get("residue")) and result[
+        "verdict"
+    ] == "passed":
         result["verdict"] = "inconclusive"
     result.setdefault("finishedAt", time.time())
     lines = [
@@ -45,6 +50,10 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
         "",
     ]
     suite = ET.Element("testsuite", name="horus")
+    if result.get("cleanupFrom"):
+        lines.extend(
+            [f"Cleanup of: {result['cleanupFrom']}", "", "Business writes were not replayed.", ""]
+        )
     count = 0
     failures = 0
     for case in result["cases"]:
@@ -73,6 +82,19 @@ def write_report(service: Service, root: Path, result: dict[str, Any]) -> dict[s
                 lines.extend(["", "```json", json.dumps(details, indent=2), "```", ""])
     suite.set("tests", str(count))
     suite.set("failures", str(failures))
+    if result.get("residue"):
+        lines.extend(
+            [
+                "## Recovery evidence",
+                "",
+                "These records include outcomes or resources that could not be fully resolved.",
+                "",
+                "```json",
+                json.dumps(result["residue"], indent=2),
+                "```",
+                "",
+            ]
+        )
     if "resourceMetrics" in result:
         lines.extend(resource_summary(ResourceMetrics.model_validate(result["resourceMetrics"])))
     text = "\n".join(lines) + "\n"
@@ -187,8 +209,7 @@ class Runner:
 
     def safe_ledger(self) -> list[dict[str, Any]]:
         return [
-            {**entry, "variables": self.redactor.clean(entry["variables"])}
-            for entry in self.ledger
+            {**entry, "variables": self.redactor.clean(entry["variables"])} for entry in self.ledger
         ]
 
     def persist_ledger(self) -> None:
@@ -306,7 +327,9 @@ class Runner:
             self.intent["environment"],
         )
         versions = {"hurl": await check_engine("hurl")}
-        if any(isinstance(step, LoadStep) for case in self.plan.cases for step in case.steps):
+        if not self.intent.get("cleanupFrom") and any(
+            isinstance(step, LoadStep) for case in self.plan.cases for step in case.steps
+        ):
             versions["k6"] = await check_engine("k6")
         result: dict[str, Any] = {
             **self.intent,
@@ -315,6 +338,8 @@ class Runner:
             "cases": [],
         }
         deadline = time.monotonic() + self.config.policy.limits.maxRunDurationMs / 1000
+        if self.intent.get("cleanupFrom"):
+            return await self.repair(result, deadline)
         for case in self.plan.cases:
             output: dict[str, Any] = {"id": case.id, "steps": [], "cleanup": []}
             result["cases"].append(output)
@@ -344,36 +369,187 @@ class Runner:
                     self.event({"caseId": case.id, "id": "timeout", "status": "inconclusive"})
                 )
             finally:
-                self.state("cleaning")
-                cleanup_deadline = (
-                    time.monotonic() + self.config.policy.limits.maxCleanupDurationMs / 1000
+                output["cleanup"] = await self.cleanup_steps(case.id, case.cleanup, context)
+        return self.finish(result)
+
+    async def cleanup_steps(
+        self,
+        case_id: str,
+        steps: list[HttpStep],
+        context: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        self.state("cleaning")
+        deadline = time.monotonic() + self.config.policy.limits.maxCleanupDurationMs / 1000
+        actions = []
+        for step in steps:
+            try:
+                action = await asyncio.wait_for(
+                    self.step(step, context, case_id=case_id, cleanup=True),
+                    max(0.001, deadline - time.monotonic()),
                 )
-                for cleanup in case.cleanup:
+            except (TimeoutError, asyncio.CancelledError) as exc:
+                if isinstance(exc, asyncio.CancelledError):
+                    self.cancelled = True
+                action = self.event(
+                    {
+                        "id": step.id,
+                        "caseId": case_id,
+                        "status": "failed",
+                        "reason": "cleanup_cancelled"
+                        if isinstance(exc, asyncio.CancelledError)
+                        else "cleanup_timeout",
+                    }
+                )
+            actions.append(action)
+        return actions
+
+    async def repair(self, result: dict[str, Any], deadline: float) -> dict[str, Any]:
+        from horus.core.runs import Runs
+
+        original_id = self.intent["cleanupFrom"]
+        root = Runs(self.service).root(self.project_ref, original_id)
+        ledger: list[dict[str, Any]] = (
+            json.loads((root / "ledger.json").read_bytes())
+            if (root / "ledger.json").exists()
+            else []
+        )
+        result["residue"] = [
+            {**entry, "reason": "original_write_outcome_unknown"}
+            for entry in ledger
+            if entry["state"] in {"intent", "unknown"}
+            and not entry["cleanup"]
+            and self.operations[entry["operationId"]]["method"] not in {"GET", "HEAD"}
+        ]
+        for case in self.plan.cases:
+            output: dict[str, Any] = {"id": case.id, "steps": [], "cleanup": []}
+            result["cases"].append(output)
+            entries = [entry for entry in ledger if entry["caseId"] == case.id]
+            if not entries:
+                output["steps"].append(
+                    self.event(
+                        {
+                            "caseId": case.id,
+                            "id": "prior-execution",
+                            "status": "passed",
+                            "reason": "no_recorded_actions",
+                        }
+                    )
+                )
+                continue
+            cleaned = {entry["stepId"] for entry in entries if entry["state"] == "cleaned"}
+            if not case.cleanup or all(step.id in cleaned for step in case.cleanup):
+                output["steps"].append(
+                    self.event(
+                        {
+                            "caseId": case.id,
+                            "id": "prior-cleanup",
+                            "status": "passed" if case.cleanup else "inconclusive",
+                            "reason": "cleanup_previously_verified"
+                            if case.cleanup
+                            else "no_approved_cleanup",
+                        }
+                    )
+                )
+                continue
+            context = {
+                "vars": {
+                    key: value
+                    for entry in entries
+                    for key, value in entry["variables"].items()
+                    if "[REDACTED]" not in json.dumps(value)
+                },
+                "secrets": self.secrets,
+                "run": {"id": original_id},
+            }
+            required = {
+                name
+                for step in case.cleanup
+                for namespace, name in VARIABLE.findall(step.model_dump_json())
+                if namespace == "vars"
+            } | {name for step in case.cleanup for name in step.requires}
+            required_steps = {name for step in case.cleanup for name in step.dependsOn}
+            authentication = []
+            for step in reversed(case.steps):
+                if not (
+                    isinstance(step, HttpStep)
+                    and step.role == "authentication"
+                    and (required.intersection(step.captures) or step.id in required_steps)
+                ):
+                    continue
+                authentication.append(step)
+                required.difference_update(step.captures)
+                required.update(
+                    name
+                    for namespace, name in VARIABLE.findall(step.model_dump_json())
+                    if namespace == "vars"
+                )
+                required.update(step.requires)
+                required_steps.update(step.dependsOn)
+            self.state("running")
+            for step in reversed(authentication):
+                if any(e["stepId"] == step.id and e["state"] == "confirmed" for e in entries):
+                    result["residue"].append(
+                        {
+                            "caseId": case.id,
+                            "stepId": step.id,
+                            "state": "unknown",
+                            "reason": "original_credential_not_persisted",
+                        }
+                    )
+                if self.cancelled or step.operationId not in self.config.policy.cleanupAllow:
+                    action = self.event(
+                        {
+                            "caseId": case.id,
+                            "id": step.id,
+                            "status": "blocked",
+                            "reason": "cancelled"
+                            if self.cancelled
+                            else "cleanup_authentication_denied",
+                        }
+                    )
+                else:
                     try:
                         action = await asyncio.wait_for(
-                            self.step(cleanup, context, case_id=case.id, cleanup=True),
-                            max(0.001, cleanup_deadline - time.monotonic()),
+                            self.step(step, context, case_id=case.id),
+                            max(0.001, deadline - time.monotonic()),
                         )
-                    except TimeoutError:
+                    except (TimeoutError, asyncio.CancelledError) as exc:
+                        if isinstance(exc, asyncio.CancelledError):
+                            self.cancelled = True
                         action = self.event(
                             {
-                                "id": cleanup.id,
                                 "caseId": case.id,
-                                "status": "failed",
-                                "reason": "cleanup_timeout",
+                                "id": step.id,
+                                "status": "inconclusive",
+                                "reason": "cleanup_authentication_interrupted",
                             }
                         )
-                    except asyncio.CancelledError:
-                        self.cancelled = True
-                        action = self.event(
-                            {
-                                "id": cleanup.id,
-                                "caseId": case.id,
-                                "status": "failed",
-                                "reason": "cleanup_cancelled",
-                            }
-                        )
-                    output["cleanup"].append(action)
+                output["steps"].append(action)
+            output["cleanup"] = await self.cleanup_steps(case.id, case.cleanup, context)
+            if any(action["status"] != "passed" for action in output["cleanup"]):
+                result["residue"].extend(
+                    {**entry, "reason": "cleanup_not_verified"}
+                    for entry in entries
+                    if not entry["cleanup"]
+                    and (
+                        entry["variables"]
+                        or self.operations[entry["operationId"]]["method"] not in {"GET", "HEAD"}
+                    )
+                )
+                result["residue"].extend(
+                    {
+                        "caseId": case.id,
+                        "stepId": entry["stepId"],
+                        "runId": self.run_id,
+                        "state": "unknown",
+                        "reason": "cleanup_credential_revocation_unverified",
+                    }
+                    for entry in self.ledger
+                    if entry["caseId"] == case.id and not entry["cleanup"]
+                )
+        return self.finish(result)
+
+    def finish(self, result: dict[str, Any]) -> dict[str, Any]:
         result["status"] = "cancelled" if self.cancelled else "completed"
         result["ledger"] = self.safe_ledger()
         self.state("reporting")

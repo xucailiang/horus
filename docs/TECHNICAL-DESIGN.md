@@ -453,13 +453,14 @@ horus plan export --workspace <workspace> --project-ref <projectRef> --review-re
 horus plan import --workspace <ci-workspace> --bundle reviewed.json
 horus run --workspace <workspace> --project-ref <projectRef> --plan-ref <planRef> --review-ref <reviewRef> --env test
 horus status --workspace <workspace> --project-ref <projectRef> --run-id <runId>
+horus cleanup --workspace <workspace> --project-ref <projectRef> --run-id <runId> --request-id <cleanupRequestId>
 ```
 
 CLI approve 完整展示材料后，等待用户输入“我确定”。日常 Agent 流程通过 MCP
 记录实际对话确认，无需再运行 CLI。run 默认等待，`--no-wait` 返回 runId，
 两者均使用固定审核范围；不允许命令行临时改目标、参数或并发。
 
-资料接入、计划生成和取消目前走 MCP；doctor、修复清理等入口仍待实现。
+资料接入、计划生成和取消目前走 MCP；修复清理共用原审核及账本，doctor 入口仍待实现。
 仅安装基础 wheel 即可回放审核包，不需要 FastMCP 或模型客户端。
 
 退出码：0 全部要求检查通过；1 功能/数据/性能阈值或清理失败；2 计划/配置/策略/依赖/引擎错误；3 只有阻塞/待判定、审核缺失/无效，或取消/中断。并存时优先级 2、1、3、0，报告仍保留全部结果。
@@ -484,6 +485,7 @@ CLI approve 完整展示材料后，等待用户输入“我确定”。日常 A
 | horus_wait_run | runId、waitMs<=30000 | 完成或有界超时；完成时含摘要和报告引用 |
 | horus_get_artifact | artifactRef、offset、limit | 计划审核材料或运行证据的脱敏内容/片段 |
 | horus_cancel_run | runId | 取消请求状态 |
+| horus_cleanup_run | 原 runId、requestId | 独立清理运行；沿用原审核、账本和 cleanupAllow，不重跑业务准备；缺失凭据或不明结果保留在报告中 |
 | horus_attach_resource_metrics | runId、metrics | 附加已审核的可选 SSH 资源观测，保留 HTTP 判定 |
 
 除能力查询、项目列表和 open_project 外，业务工具均显式带 projectRef，表内省略重复字段。项目不由宿主当前目录隐式推断；读文件仅限工作区或启动时用 --read-root 注册的只读根目录，资料/artifact 引用验证项目归属。工具不接受明文凭据或任意本机路径。默认列表 20 条，上限 100，大内容分页。save_plan 不接受审核字段；人工决定只能对已展示、待审核且版本/范围匹配的材料独立记录。对话确认引用是审计记录，不宣称是平台独立验证的身份凭据。

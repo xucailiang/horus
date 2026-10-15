@@ -3,14 +3,16 @@ import json
 import time
 import uuid
 
+import pytest
+
 from horus import worker
 from horus.adapters.hurl import HurlAdapter, Response
 from horus.adapters.k6 import K6Adapter
-from horus.core.models import HttpStep
-from horus.core.runner import Runner
+from horus.core.models import Assertion, Capture, HttpStep
+from horus.core.runner import Runner, verdict
 from horus.core.runs import Runs
 from horus.core.service import Service
-from horus.core.store import atomic_write
+from horus.core.store import HorusError, atomic_write
 from tests.support import FIXTURES, reviewed_regression_plan
 
 
@@ -89,13 +91,21 @@ async def test_secret_capture_objects_and_numbers_never_reach_events(tmp_path, m
         return Response(200, {}, {"session": {"access": "private-session", "pin": 948376}}, 1)
 
     monkeypatch.setattr(HurlAdapter, "request", request)
-    step = HttpStep.model_validate({
-        "id": "credentials", "operationId": "login", "request": {},
-        "captures": {"session": {
-            "jsonPointer": "/session", "secret": True, "purpose": "authentication",
-        }},
-        "assertions": [{"id": "status", "status": 200, "evidenceRefs": ["contract"]}],
-    })
+    step = HttpStep.model_validate(
+        {
+            "id": "credentials",
+            "operationId": "login",
+            "request": {},
+            "captures": {
+                "session": {
+                    "jsonPointer": "/session",
+                    "secret": True,
+                    "purpose": "authentication",
+                }
+            },
+            "assertions": [{"id": "status", "status": 200, "evidenceRefs": ["contract"]}],
+        }
+    )
     context = {"vars": {}, "secrets": {}, "run": {"id": runner.run_id}}
     result = await runner.step(step, context, case_id="secret")
     assert result["status"] == "passed"
@@ -146,10 +156,14 @@ async def test_secret_equal_to_control_word_cannot_change_test_verdict(tmp_path,
         return Response(500, {}, {"message": "failed"}, 1)
 
     monkeypatch.setattr(HurlAdapter, "request", request)
-    step = HttpStep.model_validate({
-        "id": "failed", "operationId": "login", "request": {},
-        "assertions": [{"id": "failed", "status": 200, "evidenceRefs": ["contract"]}],
-    })
+    step = HttpStep.model_validate(
+        {
+            "id": "failed",
+            "operationId": "login",
+            "request": {},
+            "assertions": [{"id": "failed", "status": 200, "evidenceRefs": ["contract"]}],
+        }
+    )
     action = await runner.step(step, {"vars": {}, "secrets": {}, "run": {}}, case_id="failed")
     assert action["status"] == "failed"
     assert action["id"] == "failed"
@@ -161,15 +175,165 @@ async def test_cleanup_with_missing_captures_skips_before_materializing_request(
     tmp_path, monkeypatch
 ):
     runner = prepared_runner(tmp_path, monkeypatch)
-    step = HttpStep.model_validate({
-        "id": "delete", "operationId": "deleteRecord",
-        "request": {"pathParams": {"id": "${vars.recordId}"}},
-        "requires": ["recordId"],
-        "assertions": [{"id": "status", "status": 204, "evidenceRefs": ["contract"]}],
-    })
+    step = HttpStep.model_validate(
+        {
+            "id": "delete",
+            "operationId": "deleteRecord",
+            "request": {"pathParams": {"id": "${vars.recordId}"}},
+            "requires": ["recordId"],
+            "assertions": [{"id": "status", "status": 204, "evidenceRefs": ["contract"]}],
+        }
+    )
     action = await runner.step(
         step, {"vars": {}, "secrets": {}, "run": {}}, case_id="missing", cleanup=True
     )
     assert action["status"] == "skipped"
     assert action["reason"] == "missing_cleanup_inputs"
     assert not runner.ledger
+    assert verdict([{"steps": [], "cleanup": [action]}]) == "inconclusive"
+
+
+def test_cleanup_does_not_start_while_original_run_is_active(tmp_path, monkeypatch):
+    runner = prepared_runner(tmp_path, monkeypatch)
+    with pytest.raises(HorusError, match="run_not_finished"):
+        Runs(runner.service).cleanup(runner.project_ref, runner.run_id, "still-active")
+
+
+def prepared_repair(tmp_path, monkeypatch, entries):
+    runner = prepared_runner(tmp_path, monkeypatch)
+    original_id = "run_" + uuid.uuid4().hex
+    original_root = runner.root.parent / original_id
+    atomic_write(original_root / "intent.json", {**runner.intent, "runId": original_id})
+    atomic_write(original_root / "ledger.json", entries)
+    runner.intent["cleanupFrom"] = original_id
+    runner.plan.cases = runner.plan.cases[:1]
+    return runner
+
+
+def original_entry(step_id, operation_id, variables=None):
+    return {
+        "caseId": "lifecycle",
+        "stepId": step_id,
+        "operationId": operation_id,
+        "cleanup": False,
+        "state": "confirmed",
+        "variables": variables or {},
+    }
+
+
+async def test_repair_without_persisted_resource_id_reports_unresolved_write(tmp_path, monkeypatch):
+    runner = prepared_repair(tmp_path, monkeypatch, [original_entry("create", "createRecord")])
+    case = runner.plan.cases[0]
+    case.steps = [case.steps[1]]
+    case.steps[0].captures["recordId"].secret = True
+    case.cleanup = case.cleanup[:2]
+    for step in case.cleanup:
+        step.request.headers = {}
+        step.requires = ["recordId"]
+
+    async def unexpected_request(*args):
+        pytest.fail("A secret resource ID cannot be reconstructed from the ledger")
+
+    monkeypatch.setattr(HurlAdapter, "request", unexpected_request)
+    result = await runner.repair({**runner.intent, "cases": []}, time.monotonic() + 10)
+    assert result["verdict"] == "inconclusive"
+    assert any(
+        entry["stepId"] == "create" and entry["reason"] == "cleanup_not_verified"
+        for entry in result["residue"]
+    )
+
+
+@pytest.mark.parametrize("revoke_ok", [True, False])
+async def test_repair_uses_captured_token_for_cleanup_even_when_auth_check_fails(
+    tmp_path, monkeypatch, revoke_ok
+):
+    runner = prepared_repair(
+        tmp_path,
+        monkeypatch,
+        [
+            original_entry("login", "login"),
+            original_entry("create", "createRecord", {"recordId": "resource"}),
+        ],
+    )
+    runner.plan.cases[0].steps[0].assertions.append(
+        Assertion(id="fast", elapsedMs=True, operator="lte", expected=0, evidenceRefs=["contract"])
+    )
+    resources, tokens = {"resource"}, set()
+
+    async def request(self, operation, base_url, request):
+        match operation["definition"]["operationId"]:
+            case "login":
+                tokens.add("fresh-private-token")
+                return Response(200, {}, {"token": "fresh-private-token"}, 1)
+            case "deleteRecord":
+                assert request.headers["Authorization"] == "Bearer fresh-private-token"
+                resources.clear()
+                return Response(204, {}, None, 1)
+            case "getRecord":
+                return Response(404 if not resources else 200, {}, {}, 1)
+            case "logout":
+                if revoke_ok:
+                    tokens.clear()
+                return Response(204 if revoke_ok else 500, {}, None, 1)
+            case _:
+                pytest.fail("Repair must not create business resources")
+
+    monkeypatch.setattr(HurlAdapter, "request", request)
+    result = await runner.repair({**runner.intent, "cases": []}, time.monotonic() + 10)
+    assert result["verdict"] == "failed"
+    assert not resources
+    assert bool(tokens) is not revoke_ok
+    assert (
+        any(
+            entry["reason"] == "cleanup_credential_revocation_unverified"
+            for entry in result["residue"]
+        )
+        is not revoke_ok
+    )
+    assert "fresh-private-token" not in (runner.root / "report.json").read_text()
+
+
+async def test_repair_resolves_authentication_predecessors_without_replaying_preparation(
+    tmp_path, monkeypatch
+):
+    runner = prepared_repair(
+        tmp_path,
+        monkeypatch,
+        [
+            original_entry("login", "login"),
+            original_entry("create", "createRecord", {"recordId": "resource"}),
+        ],
+    )
+    case = runner.plan.cases[0]
+    bootstrap = case.steps[0].model_copy(deep=True)
+    bootstrap.id = "bootstrap"
+    bootstrap.captures = {
+        "bootstrapToken": Capture(jsonPointer="/challenge", secret=True, purpose="authentication")
+    }
+    case.steps[0].request.headers = {"X-Challenge": "${vars.bootstrapToken}"}
+    case.steps.insert(0, bootstrap)
+    remaining = {"resource"}
+    sent = []
+
+    async def request(self, operation, base_url, request):
+        sent.append(operation["definition"]["operationId"])
+        match operation["definition"]["operationId"]:
+            case "login":
+                if "X-Challenge" not in request.headers:
+                    return Response(200, {}, {"challenge": "private-challenge"}, 1)
+                assert request.headers["X-Challenge"] == "private-challenge"
+                return Response(200, {}, {"token": "fresh-private-token"}, 1)
+            case "deleteRecord":
+                remaining.clear()
+                return Response(204, {}, None, 1)
+            case "getRecord":
+                return Response(404 if not remaining else 200, {}, {}, 1)
+            case "logout":
+                return Response(204, {}, None, 1)
+            case _:
+                pytest.fail("Repair must not create business resources")
+
+    monkeypatch.setattr(HurlAdapter, "request", request)
+    await runner.repair({**runner.intent, "cases": []}, time.monotonic() + 10)
+    assert not remaining
+    assert sent[:2] == ["login", "login"]

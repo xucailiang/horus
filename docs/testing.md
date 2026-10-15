@@ -25,6 +25,8 @@ business contract is independent of fault modes. Tests cover:
 - Review gates, immutable references, scope mismatch, and cross-project isolation.
 - Idempotent starts, disconnect/reconnect, cancellation during cleanup, and engine
   shutdown when a Worker is killed.
+- Explicit cleanup after a Worker crash, denied reauthentication, missing resource
+  IDs, authentication chains, and cleanup after an authentication assertion fails.
 - Secret redaction without corrupting execution status or asset references.
 - Direct OpenAPI URLs and common Swagger UI discovery patterns.
 - Reviewed-package integrity and replay in a clean base-wheel environment.
@@ -92,6 +94,7 @@ an SDK-only round trip must be reported as incomplete native acceptance.
 
 The first deterministic slice is implemented and locally verified. Complete
 two-client native generation and actual human approval, a second workflow-shaped
-backend, identity/branch/poll behavior, and explicit repair cleanup before claiming
+backend, identity/branch/poll behavior, parallel functional cases, and regular-expression
+assertions before claiming
 the full M1 milestone. See [implementation notes](IMPLEMENTATION.md) for current
 evidence and gaps.

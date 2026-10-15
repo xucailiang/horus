@@ -81,9 +81,9 @@ The CLI uses the same core and review gate:
 
 ```sh
 horus plan export --workspace <workspace> --project-ref <projectRef> --review-ref <reviewRef> --out reviewed.json
-horus plan import --workspace <ci-workspace> --bundle reviewed.json
-horus run --workspace <ci-workspace> --project-ref <projectRef> --plan-ref <planRef> --review-ref <reviewRef> --env test
-horus status --workspace <ci-workspace> --project-ref <projectRef> --run-id <runId>
+horus plan import --workspace <replay-workspace> --bundle reviewed.json
+horus run --workspace <replay-workspace> --project-ref <projectRef> --plan-ref <planRef> --review-ref <reviewRef> --env test
+horus status --workspace <replay-workspace> --project-ref <projectRef> --run-id <runId>
 ```
 
 `run` waits by default; `--no-wait` returns a run ID. Export/import preserves the
@@ -99,3 +99,23 @@ runtime. Changing the target or plan requires another review.
 
 The base wheel can replay a reviewed package without MCP or a model. See
 [testing](testing.md) for reproducible checks and honest acceptance criteria.
+
+## Recover cleanup after interruption
+
+Wait until the original run has ended, then call `horus_cleanup_run` with its
+`projectRef`, `runId`, and a stable `requestId`. The CLI offers the same operation:
+
+```sh
+horus cleanup --workspace <workspace> --project-ref <projectRef> --run-id <runId> --request-id <cleanupRequestId>
+```
+
+The new run uses the original approval, recorded nonsecret values, and original
+`run.id`. It executes cleanup and any required authentication steps that are also
+allowed by `cleanupAllow`. It does not repeat business preparation or load tests.
+Runtime credentials must still be available. Reuse the same request ID after a
+lost response, then wait and read the new report.
+
+Secret resource IDs and old sessions cannot be recovered from disk. The report
+retains uncertain writes and unresolved cleanup, including actions skipped for
+missing inputs. A recovery attempt does not change the original result or expand
+its approved scope.

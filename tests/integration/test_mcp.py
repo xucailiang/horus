@@ -4,7 +4,10 @@ import threading
 from fastmcp import Client
 from fastmcp.client.transports import StdioTransport
 
+from horus.core.runs import Runs
 from horus.core.service import Service
+from horus.core.store import HorusError
+from horus.mcp.server import create_server
 from tests.fixtures.reference_api import ReferenceServer
 from tests.support import FIXTURES, reviewed_regression_plan
 
@@ -24,6 +27,7 @@ async def test_empty_workspace_stdio_discovers_tools_and_preserves_project(tmp_p
         tools = {tool.name: tool for tool in await client.list_tools()}
         assert "horus_get_capabilities" in tools
         assert "horus_prepare_review" in tools
+        assert "horus_cleanup_run" in tools
         assert tools["horus_save_plan"].output_schema is not None
         result = await client.call_tool(
             "horus_open_project",
@@ -36,6 +40,21 @@ async def test_empty_workspace_stdio_discovers_tools_and_preserves_project(tmp_p
     async with Client(transport) as client:
         result = await client.call_tool("horus_open_project", {"name": project_ref})
         assert result.structured_content["projectRef"] == project_ref
+
+
+async def test_cleanup_of_active_run_returns_waitable_business_result(tmp_path, monkeypatch):
+    def active(*args):
+        raise HorusError("run_not_finished")
+
+    monkeypatch.setattr(Runs, "cleanup", active)
+    async with Client(create_server(tmp_path)) as client:
+        result = await client.call_tool(
+            "horus_cleanup_run", {"projectRef": "project", "runId": "run", "requestId": "cleanup"}
+        )
+    assert not result.is_error
+    assert result.structured_content["status"] == "blocked"
+    assert result.structured_content["issues"][0]["needsUserInput"] is False
+    assert "horus_wait_run" in result.structured_content["nextActions"]
 
 
 async def test_mcp_plan_review_execution_and_report_survive_client_disconnect(tmp_path):

@@ -36,11 +36,21 @@ class Runs:
         review_ref: str | None,
         environment: str,
         request_id: str,
+        *,
+        cleanup_from: str | None = None,
     ) -> dict[str, Any]:
         if not 1 <= len(request_id) <= 200:
             raise HorusError("invalid_request_id")
         store = self.service.project(project_ref)
         parameters = {"planRef": plan_ref, "reviewRef": review_ref, "environment": environment}
+        if cleanup_from:
+            original = self.get(project_ref, cleanup_from)
+            if original["status"] not in TERMINAL:
+                raise HorusError("run_not_finished")
+            source = json.loads((self.root(project_ref, cleanup_from) / "intent.json").read_bytes())
+            if source.get("cleanupFrom") or any(source[k] != v for k, v in parameters.items()):
+                raise HorusError("cleanup_scope_mismatch")
+            parameters["cleanupFrom"] = cleanup_from
         key = store.root / "requests" / f"{digest(request_id)}.json"
         with file_lock(store.root / ".start.lock"):
             if key.exists():
@@ -141,6 +151,18 @@ class Runs:
         if state["status"] not in TERMINAL:
             atomic_write(root / "cancel.json", {"at": time.time()})
         return {"runId": run_id, "status": "cancel_requested"}
+
+    def cleanup(self, project_ref: str, run_id: str, request_id: str) -> dict[str, Any]:
+        """Run only the original approved cleanup with recoverable identifiers and fresh auth."""
+        intent = json.loads((self.root(project_ref, run_id) / "intent.json").read_bytes())
+        return self.start(
+            project_ref,
+            intent["planRef"],
+            intent["reviewRef"],
+            intent["environment"],
+            request_id,
+            cleanup_from=run_id,
+        )
 
     def attach_metrics(
         self, project_ref: str, run_id: str, metrics: ResourceMetrics

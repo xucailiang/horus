@@ -82,6 +82,12 @@ permissions still apply. Plan, target, or scope changes need another review.
 - Explain actual coverage, failures, performance metrics, inconclusive results, and
   cleanup residue. A test failure is a valid business result, not a broken MCP call
   to retry blindly. Include authorized resource observations and their limitations.
+- If a finished run needs cleanup recovery, call `horus_cleanup_run` with the original
+  run ID and a stable request ID, then wait and read its report. It uses the existing
+  approval, recoverable nonsecret IDs, and approved cleanup. Required authentication
+  and its authentication predecessors must also be in `cleanupAllow`; preparation
+  and exercise steps cannot be replayed. Do not recreate missing resources or broaden
+  scope. Lost credentials, unknown writes, and missing inputs remain unresolved evidence.
 - Finish and deliver this run first. Additional tests form a separate revised plan
   with reasons and fresh confirmation; do not extend the approved run indefinitely.
   CLI supports setup and repeatable replay, not missing steps in the normal MCP workflow.

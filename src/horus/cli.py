@@ -48,6 +48,20 @@ async def wait_finished(runs: Runs, project: str, run_id: str) -> dict[str, Any]
             return result
 
 
+def emit_run(runs: Runs, project: str, start: Callable[[], dict[str, Any]], wait: bool) -> None:
+    def execute() -> dict[str, Any]:
+        result = start()
+        return asyncio.run(wait_finished(runs, project, result["runId"])) if wait else result
+
+    result = emit(execute)
+    if wait:
+        status = result.get("verdict", "inconclusive")
+        code = (
+            2 if status == "error" else 1 if status == "failed" else 0 if status == "passed" else 3
+        )
+        raise typer.Exit(code)
+
+
 @app.command()
 def run(
     workspace: Annotated[Path, typer.Option()],
@@ -61,19 +75,32 @@ def run(
     """Replay a reviewed plan and return its automatic report; no MCP or model is loaded."""
     runs = Runs(Service(workspace))
 
-    def execute() -> dict[str, Any]:
-        result = runs.start(
+    emit_run(
+        runs,
+        project_ref,
+        lambda: runs.start(
             project_ref, plan_ref, review_ref, environment, request_id or uuid.uuid4().hex
-        )
-        return asyncio.run(wait_finished(runs, project_ref, result["runId"])) if wait else result
+        ),
+        wait,
+    )
 
-    result = emit(execute)
-    if wait:
-        status = result.get("verdict", "inconclusive")
-        code = (
-            2 if status == "error" else 1 if status == "failed" else 0 if status == "passed" else 3
-        )
-        raise typer.Exit(code)
+
+@app.command()
+def cleanup(
+    workspace: Annotated[Path, typer.Option()],
+    project_ref: Annotated[str, typer.Option()],
+    run_id: Annotated[str, typer.Option()],
+    request_id: Annotated[str | None, typer.Option()] = None,
+    wait: Annotated[bool, typer.Option("--wait/--no-wait")] = True,
+) -> None:
+    """Retry only a finished run's approved cleanup and report unresolved outcomes."""
+    runs = Runs(Service(workspace))
+    emit_run(
+        runs,
+        project_ref,
+        lambda: runs.cleanup(project_ref, run_id, request_id or uuid.uuid4().hex),
+        wait,
+    )
 
 
 @plans.command("export")
@@ -83,7 +110,7 @@ def export_plan(
     review_ref: Annotated[str, typer.Option()],
     out: Annotated[Path, typer.Option()],
 ) -> None:
-    """Export a closed, already-reviewed package for trusted CI input, without credential values."""
+    """Export a closed, already-reviewed package for replay, without credential values."""
 
     def save() -> dict[str, Any]:
         payload = export_review(Service(workspace), project_ref, review_ref)

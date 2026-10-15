@@ -43,12 +43,16 @@ and target. That decision applies to the version you reviewed; changes need
 another review.
 
 horus provides the tools through MCP and uses Hurl for HTTP checks and k6 for basic
-load testing. A Worker follows the approved plan, keeps each run's state and variables separate,
-and produces JSON, Markdown, JUnit, and MCP-readable reports. It can keep running
+load testing. A Worker follows the approved plan, keeps state and variables within
+each run, and produces JSON, Markdown, JUnit, and MCP-readable reports. It can keep running
 through a host disconnect, recognize a repeated start request, and stop its
 engines if the Worker dies. Cancellation and cleanup have explicit time limits.
 Reviewed plans can also be exported, imported, and replayed through the base CLI
 without MCP or a model.
+
+After an interrupted run, an explicit cleanup attempt can use recorded resource
+IDs and the original approved actions. Lost credentials and uncertain writes stay
+visible in the report; recovery cannot promise that every resource was removed.
 
 If resource usage matters to the test, you can authorize the host Agent to collect
 CPU, GPU, and memory observations over SSH. A short baseline can inform the proposed
@@ -100,7 +104,7 @@ horus is in early development. The first execution flow and base-wheel replay ha
 been verified locally; the full M1 milestone is still open. Native acceptance in
 both clients, including actual human confirmation, and a second workflow backend
 remain to be completed. Identity profiles, branches, polling, parallel functional
-cases, regular-expression assertions, and explicit repair cleanup are also pending.
+cases and regular-expression assertions are also pending.
 Automated fixture approvals do not count as human acceptance.
 
 The Chinese [requirements](docs/PRD-horus.md),
