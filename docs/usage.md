@@ -110,10 +110,14 @@ No extra language-model API key is needed by horus itself.
 
 ## The review-to-report workflow
 
-Give the Agent an OpenAPI/Swagger definition or common Swagger UI URL, the target
-environment, credential binding names, and the behavior to verify. Chat material
-and optional source findings can become `plan.supportingContext`; cite each as
-`context:<id>`. Interface evidence uses `sourceRef#Lx` line references.
+Give the Agent your API documentation as an online link or a local file, along
+with the target environment, credential binding names, and behavior to verify.
+For OpenAPI/Swagger links, use `horus_import_api`; for local OpenAPI or Markdown
+files, use `horus_register_source` within a configured read root. The Agent reads
+the documentation and maps business workflows and call dependencies before
+designing tests. Chat material and optional source findings can become
+`plan.supportingContext`; cite each as `context:<id>`. Interface evidence uses
+`sourceRef#Lx` line references.
 
 The Agent opens a project, imports the API, stages a config, reads the plan schema,
 generates business understanding and executable cases, and validates the plan.

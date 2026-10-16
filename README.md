@@ -17,20 +17,20 @@ functional and basic load checks, and assess the results.
 - **Portable.** Connect any coding tool with local MCP support through the standard
   protocol. Load the Skill natively or have the agent read it directly.
 
-You choose the business risks and expected results, and provide an OpenAPI/Swagger
-definition and requirements. AI maps the business rules and call dependencies into
-an executable plan. After you confirm its scope and checks, horus runs the tests,
-cleans up test data, and returns results with evidence.
+Import your API documentation from a URL or a local file. The agent reads it,
+maps the business workflows and call dependencies, and builds a test plan around
+the risks and expected results you describe. After you confirm its scope and
+checks, horus runs the tests, cleans up test data, and returns results with evidence.
 
 ```text
-Business goal + API definition → AI-designed plan → Your confirmation → Tests + cleanup → Results
+API docs + Business goal → Understand call flows → Test plan → Your confirmation → Tests + cleanup → Results
 ```
 
 ## Features
 
-- **Design tests around business behavior.** Connect requirements, API definitions,
-  and optional source context to business rules, call sequences, and expected
-  results. Plans make their evidence, assumptions, and gaps visible.
+- **Understand business workflows from API documentation.** Map operations and
+  call dependencies, then use requirements and optional source context to design
+  checks. Plans make their evidence, assumptions, and gaps visible.
 - **Verify complete workflows.** Prepare isolated data, pass values between calls,
   check permissions, state changes, conditional paths, and asynchronous results,
   then clean up. Hurl checks response data as well as HTTP status.
@@ -66,7 +66,7 @@ and workflow.
 Once installed, start a test:
 
 ```text
-Use horus to test <service URL>, with the API definition at <OpenAPI/Swagger URL>.
+Use horus to test <service URL>. Import the API documentation from <URL or local file path>.
 Understand the business rules and call dependencies, then propose functional
 and basic concurrency tests, including data preparation and cleanup.
 Show me the plan and load limits first. After I confirm, run it and return the report.

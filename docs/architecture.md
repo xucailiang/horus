@@ -6,7 +6,7 @@ does not run a model, clone business repositories, or build a source index.
 
 ```mermaid
 flowchart LR
-    API[OpenAPI / Swagger URL] --> Agent[Host Agent + Skill]
+    API[API documentation URL / local file] --> Agent[Host Agent + Skill]
     Context[Optional chat / source findings] --> Agent
     Agent --> Draft[Validate draft in memory]
     Draft --> Review[Readable plan and confirmation in chat]

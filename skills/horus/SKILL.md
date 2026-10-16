@@ -16,9 +16,12 @@ this file and its references directly when no loader is available.
 - Read existing plans with `horus_get_plan` and follow `nextOffset` until complete.
   Use `horus_get_artifact` for review/report artifacts. Reading a plan does not
   authorize a new test. For new tests, preview the draft in chat before saving it.
-- Import the supplied OpenAPI/Swagger definition or common Swagger UI URL with
-  `horus_import_api`. Read the catalog and numbered evidence through `horus_get_context`.
-  If several definitions are found, select the intended one or ask the user.
+- Accept API documentation as an online link or a local file. Use `horus_import_api`
+  for OpenAPI/Swagger or common Swagger UI URLs; use `horus_register_source` for
+  local OpenAPI/Markdown files within a configured read root. Read the catalog and
+  numbered evidence through `horus_get_context`, then map the business workflows
+  and call dependencies. If several definitions are found, select the intended
+  one or ask the user.
 - Stage a config with the target, environment, credential binding names, operations,
   and limits. Credential values come from the runtime environment. Never put them in
   chat, tool parameters, plans, or reports. Resolve missing inputs before review.
