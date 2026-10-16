@@ -1,189 +1,235 @@
 # Roadmap
 
-## Purpose and positioning
+horus is an AI-native API testing workspace for anyone who needs to verify a
+service. Its direction is to preserve user judgment while making professional
+testing easier to automate, review, and adapt. Tests should follow what users
+need to accomplish with a service.
 
-horus aims to make professional API testing accessible to anyone who needs to
-verify a service. Tests follow real user scenarios. Users retain control over
-test goals, acceptance criteria, and execution scope, with workflows they can
-automate, audit, and adapt.
+This roadmap proposes concrete additions to support that direction. The delivery
+sequence is provisional, with no committed release dates. Available capabilities
+and implementation limits are documented in the [architecture](architecture.md).
 
-Users should be able to start by describing a goal in plain language, then inspect
-and refine scenarios, test data, assertions, load profiles, and execution details
-as needed. The workflow should accommodate both people new to testing and
-experienced practitioners working on complex scenarios.
+## Strategic directions and planned capabilities
 
-The stages below describe planned outcomes, with no committed release dates. For
-available features and limitations, see the [architecture](architecture.md). The
-[usage guide](usage.md) covers installation and operation.
+| Strategic direction | What needs to improve | Planned capabilities |
+| --- | --- | --- |
+| Test from the user's perspective | Functional workflows are supported, but load tests repeat one API operation at a time. A plan targets one service address per environment. | Concurrent user journeys, task-level performance metrics, and scenarios spanning multiple services. |
+| Make testing accessible while retaining expert control | Planning relies on the host agent interpreting the schema and assembling a plan. Users need useful starting points and a clear way to refine details. | Guided scenario design, reference scenarios, focused validation feedback, and progressive access to execution details. |
+| Automate work within a reviewable scope | Approved plans can be replayed, but revisions lack a computed diff and some review and execution controls remain incomplete. | Plan revision summaries, complete validation of business references, supported approval revocation, and consistent automation interfaces. |
+| Support flexible, professional test design | Load execution has one workload model and small fixed ceilings. Repeated input variations require separate case definitions. | Additional workload models, configurable tested limits, data-driven scenarios, and a documented assertion support matrix. |
+| Keep tests useful as services change | Plans and results are saved, but there is no scenario catalog, change impact analysis, or built-in baseline comparison. | Reusable scenario definitions, parameter sets, version and environment context, comparable-run reports, and assisted updates after API changes. |
+| Grow through open-source use | Installation and examples must work for people outside the development environment. | Verified setup instructions, examples at several levels of complexity, real-client acceptance checks, and contribution guidance tied to the roadmap. |
 
-## The unit of value: a user scenario
+## Current baseline and limits
 
-A test scenario describes a user's goal, the conditions under which they use the
-service, and the expected outcome. API requests reproduce the steps in that
-scenario; request-level metrics help explain the user's experience.
+The alpha already includes API imports, planning through the host agent, review
+in the conversation, functional workflows, identity profiles, conditional paths,
+asynchronous polling, basic load tests, cleanup, and Markdown/JSON/JUnit reports.
+Separate projects and CLI replay of approved plans are also implemented. These
+capabilities are the starting point for this roadmap.
 
-For example, a user submits a job, waits for processing, and retrieves a result.
-The test should check the result and access rules, measure the time to complete
-the task, and examine failure behavior and concurrent use. Request latency alone
-does not describe the complete task.
+Current constraints relevant to the planned work:
 
-Functional correctness, performance, and reliability should all be evaluated in
-the context of the user scenario. Performance testing is an important part of
-verifying a service as people use it.
+- Each environment has one base URL. Separate projects can target different
+  services, but one scenario cannot explicitly route steps across service targets.
+- A load step repeats one operation with fixed virtual users and a shared
+  iteration count. It does not execute a complete user journey per iteration.
+- Configured ceilings are 10 virtual users, 1,000 load iterations, 60 seconds per
+  load step, 1,500 requests and 120 seconds per run, and 30 seconds for cleanup.
+  Functional cases run with one or two concurrent consumers.
+- Revised plans retain a parent reference and change reason, but review does not
+  compute a parent/child diff.
+- Business reference validation is incomplete. The core checks revocation, but
+  there is no supported revocation command or MCP operation. The configured
+  report-generation timeout is not enforced.
+- Pre-review probing has no execution entry point; its configuration field is
+  unused. This roadmap does not depend on adding exploratory requests before
+  approval.
 
-A confirmed test scenario preserves the user's intent, expected behavior,
-execution conditions, checks, and supporting evidence. Reusing and maintaining
-these scenarios should improve test quality and reduce manual work on later runs.
+See [current limits](architecture.md#current-limits) for the maintained description
+of these constraints.
 
-## Product principles
+## 1. User scenarios: complete workflows under load
 
-Users decide what to test, the expected behavior, execution limits, and acceptable
-trade-offs. The host agent helps turn those decisions into a test plan. horus
-executes the plan and evaluates its checks. The user must be able to review
-missing requirements, conflicts, assumptions, and inconclusive results.
+The next step beyond single-operation load tests is to run the sequence of actions
+that a user actually performs, including asynchronous completion and interactions
+between services.
 
-Users can describe their intent naturally. Before execution, the agent must
-translate that intent into a reviewable plan with explicit conditions and expected
-results. Simple scenarios should require little setup, with more detailed control
-available for complex scenarios. Changes to the plan must remain visible and
-require approval under the same rules as the original plan.
+Planned additions:
 
-| Principle | What it requires |
-| --- | --- |
-| Automatable | A defined test goal can become a complete, repeatable workflow with explicit limits, including preparation, checks, cleanup, and reporting. |
-| Auditable | Users can review the plan, inspect what actually ran, and trace conclusions to expectations and execution evidence. |
-| Flexible | Users can refine and reuse scenarios, adjust execution details, and choose how to invoke the workflow. |
-| Professional | Test design, workload modeling, execution, and reporting follow established testing practices and clearly state their limitations. |
+- Execute a reviewed sequence of requests, captures, assertions, branches, and
+  bounded polling as one load-test iteration. Preserve the semantics of the
+  corresponding functional scenario.
+- Isolate variables, authentication state, and created resources for each simulated
+  user or iteration. Declare which preparation is shared and which runs for each
+  user or iteration.
+- Report attempted, completed, successful, and failed journeys; completed journeys
+  per second; and journey-duration percentiles. Keep request-level measurements
+  available for investigation.
+- Define the measured journey boundaries in the plan. Include declared waits and
+  asynchronous completion in task duration; report preparation and cleanup
+  separately when they are outside those boundaries.
+- Add named service targets with their own API definitions and credential
+  bindings. Route each scenario step to an explicit target and capture data
+  dependencies across services.
 
-Automate request sequencing and data preparation while keeping the test scope,
-acceptance criteria, and coverage gaps clear to the user.
+Constraints: all targets, identities, measured steps, load limits, and cleanup
+actions must appear in the reviewed plan. Concurrency must preserve case data
+isolation. Unsupported combinations must fail validation before approval.
+Cross-service execution does not imply distributed load generation or automatic
+service discovery.
 
-## Current foundation
+Acceptance: one reviewed scenario can create a resource, submit work, wait for
+completion, and verify the result under concurrent users. A second fixture must
+exercise a workflow across two service targets. Reports must distinguish failed,
+unfinished, and successful journeys and account for their cleanup.
 
-The alpha supports API imports, test planning with the host agent, plan review in
-the conversation, functional tests with execution limits, basic load tests, data
-cleanup, and saved execution records. It also supports identity profiles,
-conditional paths, asynchronous polling, separate local projects, and replay of
-approved plans through the CLI.
+## 2. Accessible planning with progressively deeper control
 
-Current load steps repeat a single API operation with a fixed number of virtual
-users and iterations. Concurrent execution of complete user journeys, scenarios
-spanning multiple service targets, automated change impact analysis, and built-in
-baseline comparisons are planned. Users can inspect saved results manually, but
-must still establish whether the test conditions allow a meaningful comparison.
+Users should be able to begin with a business goal and refine the resulting test
+without learning the complete plan schema first.
 
-## Outcome roadmap
+Planned additions:
 
-Each stage builds on the previous one. Ease of use, user control, traceability,
-and professional testing practices apply throughout. Existing features may
-support several stages; progress depends on demonstrated results in use.
+- Add guided planning steps for actors, user goals, expected behavior, test data,
+  load expectations, and missing inputs. Ask for information that affects the
+  proposed test, and reuse confirmed context.
+- Provide reference scenarios for common patterns: a resource lifecycle,
+  access-control checks, an asynchronous task, and a concurrent user journey.
+  Keep simple examples usable without advanced configuration.
+- Present validation errors with the affected scenario or step, why the plan is
+  invalid, and what the user or host agent needs to resolve.
+- Let users request a focused change to a scenario, assertion, dataset, or load
+  profile while preserving unaffected parts of the plan.
 
-### 1. Express intent and complete a trustworthy scenario
+Constraints: these improvements use the existing host agent, Skill, and MCP
+workflow. A new chat application or horus-hosted model is outside scope.
+Defaults and inferred expectations must be visible in the plan; missing business
+requirements must remain explicit.
 
-Users can describe a real user goal, review the proposed test design, and delegate
-a complete test run without manually configuring each request.
+Acceptance: a new user can complete a reference scenario from a plain-language
+goal. An experienced user can change a specific test condition without rebuilding
+the plan. Both can inspect the resulting scope and acceptance criteria.
 
-Priorities:
+## 3. Automation and auditability: repeatable execution, reviewable changes
 
-- Design tests around user goals, expected behavior, and relevant risks, using
-  API documentation, requirements, and optional source context as evidence.
-- Make missing information and assumptions clear before execution, and let the
-  user inspect and refine the proposed scenario at the depth they need.
-- Complete data preparation, business operations, checks, cleanup, and reporting
-  within the agreed scope.
-- Report whether users can complete their tasks as expected, with detailed
-  request and response records available for investigation.
+Automation should reduce repeated work while retaining the user's decisions about
+what may run.
 
-Assess progress by having people with different levels of testing experience run
-representative scenarios on real services and explain the results and coverage
-limits. Track preparation effort and manual steps during execution. Use known
-faults to check that the tests detect incorrect behavior and the reports identify
-incomplete verification.
+Planned additions:
 
-### 2. Expand the complexity one person can handle
+- Compute a revision summary showing changes to business expectations, requests,
+  identities, service targets, load, cleanup, and coverage. Display it alongside
+  the full revised plan.
+- Complete validation of business IDs, state/resource references, and dependency
+  producers and consumers.
+- Expose approval revocation through supported interfaces and enforce the report
+  timeout, so advertised controls have an operational effect.
+- Extend MCP and CLI access to new scenario-selection, review, comparison, and
+  reporting capabilities as they are added. Preserve machine-readable results
+  and exit codes for external automation.
+- Document an external pipeline example that replays an approved scope and
+  publishes its artifacts without requiring a model for each run.
 
-Users can delegate more complex scenarios while retaining control over test
-objectives and execution conditions.
+Constraints: changing the plan, target, configuration, or execution scope requires
+a new review under the existing approval rules. Approval records remain local
+records, not independent authentication of a reviewer. Local execution state and
+recovery remain necessary; a managed offline task system, scheduler, persistent
+task queue, or always-on orchestration service is outside scope.
 
-Priorities:
+Acceptance: a user can inspect a concrete revision, approve that exact version,
+replay it through the CLI, and trace results to the approved plan. A revoked
+approval blocks new execution. Regression tests verify business reference
+validation, approval revocation, and enforcement of report-generation deadlines.
 
-- Extend scenario design to cover interactions between identities, data
-  dependencies, branches, asynchronous behavior, and failure paths as needed.
-- Support concurrent user journeys and measure task-level outcomes, using load
-  profiles that answer a specific testing question.
-- Support scenarios across multiple service targets, with explicit identities,
-  dependencies, execution limits, and cleanup responsibilities.
-- Let users inspect and adjust execution details while retaining the rest of
-  the scenario and its business purpose.
+## 4. Flexibility and professional execution: workloads and test data
 
-Assess progress through scenarios that previously required substantial manual
-coordination or custom scripts. As scenarios become more complex, preparation and
-manual intervention should grow more slowly. Reports should trace task success,
-completion time, and failure behavior to execution evidence.
+Additional execution options should answer specific testing questions and retain
+the same review and reporting guarantees.
 
-### 3. Accumulate verification capability as services evolve
+Planned additions:
 
-Users can reuse confirmed scenarios and evidence across test runs, service
-updates, and multiple projects, reducing the effort required for subsequent tests.
+- Extend fixed-iteration execution to complete scenarios, then add fixed-duration
+  concurrency and staged increases in concurrency. Each profile must declare its
+  limits and completion conditions.
+- Replace the current small fixed ceilings with configurable limits backed by
+  engine and cancellation tests. Publish supported bounds; increasing a number
+  alone does not establish that the load generator can sustain it.
+- Add named datasets and parameterized scenarios so boundary values, invalid
+  inputs, and identity combinations can reuse one scenario definition. Record
+  the dataset and parameter values used by each run, with secret redaction.
+- Document which assertions are supported by functional and load execution.
+  Extend support where real scenarios require it, with equivalent semantics
+  and explicit rejection of unsupported checks.
 
-Priorities:
+Constraints: scenario logic, input data, load configuration, and acceptance
+criteria must remain distinguishable in review. Do not silently omit checks,
+change expected results, or adjust reviewed load parameters. Fixed arrival-rate,
+spike, soak, distributed-load, and arbitrary-script extensions are candidates for
+later evaluation, not commitments in this sequence.
 
-- Make confirmed scenarios easy to find, reuse, modify, and combine while
-  preserving their intent, sources, and scope.
-- Identify scenarios affected by changes to API contracts or requirements, and
-  explain proposed updates for the user to review.
-- Record service versions, environments, test data, scenario versions, and load
-  profiles in enough detail to determine whether results are comparable.
-- Compare results with suitable baselines, explaining changes in test conditions
-  and uncertainty in the comparison.
-- Keep scenarios and execution evidence accessible to the host agent and the
-  user's external automation tools.
+Acceptance: the same scenario can run against multiple datasets and supported
+load profiles. Reports state the actual workload, completed work, data failures,
+and incomplete execution. Cancellation and cleanup remain bounded as load grows.
 
-Assess progress through repeat use after service changes: users should be able
-to reuse earlier work and spend less time reconstructing context and maintaining
-tests. They should understand changes to scenarios and results, and which
-conclusions the evidence supports.
+## 5. Reuse and service evolution: maintain scenarios and compare results
 
-## Investment and scope
+Saved runs should become a practical regression workflow across multiple projects
+and service versions.
 
-Prioritize realistic scenarios, more complete test automation, and better control
-and reuse of test assets. Build on the existing general-purpose design, adding
-protocols, engines, and integrations when real scenarios require them.
+Planned additions:
 
-Keep the following boundaries:
+- Add a scenario catalog with names, descriptions, revisions, source references,
+  and project associations. Let users find, select, and reuse confirmed scenarios.
+- Separate reusable scenario logic from environment-specific values and approved
+  parameter sets. Resolve inputs before review and preserve the existing approval
+  requirements when a binding changes the execution scope.
+- Record caller-supplied service version identifiers, environment details,
+  scenario and dataset versions, and load profiles with each run.
+- Let users select a baseline run and produce a comparison of correctness,
+  completed work, task duration, request metrics, and available resource
+  observations. Identify changed conditions and missing context before presenting
+  a performance conclusion.
+- Compare imported API definitions, identify affected scenario steps, and let the
+  host agent propose a revised plan. Include the reasons and coverage changes in
+  review.
 
-- Focus on what individuals can accomplish. Enterprise administration,
-  organizational permissions, and approval-management systems are outside the
-  current scope.
-- Let users choose orchestration through conversation or external pipelines.
-  horus will not provide its own offline task platform, scheduler, persistent job
-  queue, or always-on task service in this roadmap. Local run records and recovery
-  support reliable execution; callers manage longer-running workflows.
-- Keep model reasoning with the host agent and use established execution tools.
-  A dedicated chat application, hosted model service, and custom load engine are
-  outside the current scope.
-- Incorporate external resource measurements when useful. Building a full
-  monitoring platform or promising automatic root-cause diagnosis is outside
-  the current scope.
-- Reuse confirmed business context and scenarios. Keep review focused on decisions
-  and changes while preserving the exact execution scope and supporting evidence.
+Constraints: a changed schema does not define the intended business behavior by
+itself. Updates must preserve user-confirmed expectations until the user changes
+them. Comparisons must state uncertainty when environments, data, or workloads
+differ. Source inspection stays with the host agent; horus does not need its own
+repository crawler or source index.
 
-## Open-source adoption and roadmap decisions
+Acceptance: after a service update, a user can find the previous scenario, review
+an affected-step summary, approve a revision, rerun it, and compare results with a
+chosen baseline. Incompatible or poorly documented runs cannot yield an
+unqualified regression verdict.
 
-User adoption and maintainability guide the project. Revenue is not a project
-objective. Every stage should include clear documentation, reliable installation,
-representative examples, and feedback from people using horus on real services.
+## Delivery sequence
 
-Measure whether users complete their first scenario, return to run tests again,
-spend less time on manual work, and handle more complex tests. Also assess whether
-the evidence helps them make informed decisions. Test counts and the number of
-features alone are insufficient measures.
+| Priority | Deliverables | Dependency or release condition |
+| --- | --- | --- |
+| Next | Guided reference scenarios, actionable validation errors, plan revision summaries, and the incomplete review/execution controls listed above. | Establish a reliable plan and review contract before expanding execution. |
+| Then | Complete user journeys under load, journey metrics, and explicit multi-service targets. | Reuse the reviewed scenario contract. Functional multi-target routing can ship independently; combined load support requires acceptance of both capabilities. |
+| Following | Parameterized datasets, additional concurrency profiles, and tested configurable limits. | Functional parameterization can ship independently; larger workloads require isolated journey execution and bounded cleanup. |
+| Later | Scenario catalog, reusable environment bindings, baseline comparison, and API-change assistance. | Scenario identity and recorded run context must exist before reliable historical comparison. |
+| Every stage | Setup checks, examples, real-client acceptance, and updated capability documentation. | Shipped features must be usable outside the development checkout and distinguishable from planned work. |
 
-Continue to test whether people can describe useful test goals without specialist
-terminology, whether scenario reuse saves more effort than maintenance requires,
-and whether greater flexibility preserves reviewability and reliable execution.
+## Project-wide boundaries
 
-For each milestone, define the expected user benefit, the assumption to validate,
-the smallest useful change, and the evidence needed to decide what follows.
-Revisit priorities when users encounter different constraints. Each addition
-should help users describe tests, execute them, or interpret the results.
+- Keep the product centered on what an individual can accomplish. Enterprise
+  administration, organizational permissions, and approval-management systems
+  remain outside this roadmap.
+- Keep model reasoning in the host agent and execution on established tools.
+  Additional protocols and integrations require demonstrated scenario needs.
+- Use resource observations as supporting evidence. A full monitoring platform
+  and guaranteed automatic root-cause diagnosis are outside scope.
+- Keep plans, reports, and detailed evidence usable in conversation and through
+  external automation. Users choose orchestration.
+- Prioritize open-source adoption and maintainability. Revenue is not a project
+  objective.
+
+Implementation proposals should identify the strategic direction they serve, the
+capability being added, its review and execution constraints, and the acceptance
+scenario. A feature is complete when that scenario works and its limitations are
+documented.
