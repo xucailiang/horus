@@ -1,8 +1,10 @@
 # horus
 
+<img src="docs/assets/horus-logo.png" alt="horus 标识" width="360" />
+
 [English](README.md) · [安装与使用](docs/usage.md) · [架构说明](docs/architecture.md)
 
-horus 是一个通过 MCP 接入 Codex、Claude Code 的 AI 原生接口测试平台。
+horus 是一个通过 MCP 和通用 Skill 接入编程工具的 AI 原生接口测试平台。
 在开发服务的同一段对话里，理解业务规则和接口调用关系，完成功能检查与基础并发测试。
 
 提供 OpenAPI/Swagger 定义和需要验证的业务行为，Agent 据此提出测试计划。
@@ -28,20 +30,17 @@ Linux；被测服务的编程语言不限，接口范围为 HTTP/REST + JSON。�
 
 ## 快速开始
 
-需要 Python 3.12、uv 0.9.11 和 GitHub CLI（`gh`）。从源码安装：
+把下面这段话发给你的编程助手：
 
-```sh
-git clone https://github.com/xucailiang/horus.git
-cd horus
-uv sync --python 3.12 --frozen --extra mcp --group dev
-uv run python scripts/install_engines.py
+```text
+请按照 https://github.com/xucailiang/horus/blob/master/docs/usage.md 安装 horus，
+在当前编程工具中配置 MCP 和 Skill，并验证连接。
 ```
 
-安装脚本下载官方 Hurl 8.0.1、k6 2.3.0，并校验 SHA-256。
-如已安装对应版本，可通过 `HORUS_HURL_BIN` 和 `HORUS_K6_BIN` 指定路径。
+Agent 会根据[接入指南](docs/usage.md)完成依赖安装、MCP 配置和 Skill 安装，手动步骤也在同一文档中。
 
-按照[接入指南](docs/usage.md)配置 Codex 或 Claude Code 的 MCP，并安装随包提供的 Skill。
-两者需要分别配置；运行 `uv run horus skill` 可查看 Skill 位置。
+支持本地 MCP 的编程工具均可接入。Skill 可通过客户端原生机制加载，也可让 Agent 读取
+`skills/horus/SKILL.md`。Codex 和 Claude Code 已完成验证，其他客户端使用同一套服务和流程。
 
 配置完成后，在编程 Agent 中发起测试：
 

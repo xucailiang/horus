@@ -1,17 +1,49 @@
 # Using horus with a host Agent
 
+horus exposes a local stdio MCP server and a portable Skill. The workflow is not
+tied to a particular coding tool. Codex and Claude Code examples are below; other
+MCP clients use the same launch command and Skill instructions.
+
+## Install with your coding agent
+
+Paste this into your coding agent:
+
+```text
+Follow https://github.com/xucailiang/horus/blob/master/docs/usage.md to install
+horus, configure its MCP server and Skill in this coding tool, and verify the connection.
+```
+
+For the installing agent:
+
+1. Inspect the current OS and client configuration. Install or reuse Python 3.12,
+   uv, and GitHub CLI. Clone this repository to a persistent local directory, or
+   reuse an existing checkout; keep test results in a separate persistent workspace.
+2. Run the manual installation commands below. The engine installer verifies the
+   pinned Hurl/k6 releases. Reuse existing matching binaries when available.
+3. Merge a `horus` stdio MCP entry into the current client's configuration. Use
+   absolute paths for uv, the checkout, and the workspace. Preserve unrelated
+   settings and servers. Use the client's supported configuration format.
+4. Install the complete `skills/horus/` directory, including its references, using
+   the client's Skill mechanism. If it has no native Skill loader, instruct the
+   agent to read `SKILL.md` and follow its references when needed.
+5. Reload the MCP connection and call `horus_get_capabilities`. Report success
+   only after that call works. If the client requires a restart, give that one
+   remaining step. Do not create a test plan or contact a target service during installation.
+
+## Manual installation
+
 Install the current version from this repository:
 
 ```sh
 git clone https://github.com/xucailiang/horus.git
 cd horus
-uv sync --python 3.12 --frozen --extra mcp --group dev
-uv run python scripts/install_engines.py
-uv run horus skill
+uv sync --python 3.12 --frozen --extra mcp --no-dev
+uv run --no-dev python scripts/install_engines.py
+uv run --no-dev horus skill
 ```
 
-Python 3.12, uv, GitHub CLI, and the pinned Hurl/k6 binaries are required for the
-full development workflow. The installer verifies official release checksums.
+Use Python 3.12 and uv 0.9.11. The installer requires GitHub CLI and downloads
+Hurl 8.0.1 and k6 2.3.0, verifying official release checksums. macOS and Linux are supported.
 Use `HORUS_HURL_BIN` / `HORUS_K6_BIN` for existing matching binaries.
 
 ## Connect MCP and install the Skill
@@ -20,18 +52,22 @@ These are separate steps. Replace every absolute path below. Keep the project
 checkout separate from the persistent test workspace. Inject credential values
 into the MCP process environment; tools receive binding names only.
 
-Codex `config.toml`:
+### Codex
+
+`config.toml`:
 
 ```toml
 [mcp_servers.horus]
 command = "/absolute/path/to/uv"
-args = ["--directory", "/absolute/path/to/horus", "run", "--frozen", "--python", "3.12", "--extra", "mcp", "horus", "mcp", "--workspace", "/absolute/path/to/workspace"]
+args = ["--directory", "/absolute/path/to/horus", "run", "--no-dev", "--frozen", "--python", "3.12", "--extra", "mcp", "horus", "mcp", "--workspace", "/absolute/path/to/workspace"]
 env_vars = ["HORUS_USERNAME", "HORUS_PASSWORD"]
 startup_timeout_sec = 30
 tool_timeout_sec = 60
 ```
 
-Claude Code `.mcp.json`:
+### Claude Code
+
+`.mcp.json`:
 
 ```json
 {
@@ -39,13 +75,15 @@ Claude Code `.mcp.json`:
     "horus": {
       "type": "stdio",
       "command": "/absolute/path/to/uv",
-      "args": ["--directory", "/absolute/path/to/horus", "run", "--frozen", "--python", "3.12", "--extra", "mcp", "horus", "mcp", "--workspace", "/absolute/path/to/workspace"]
+      "args": ["--directory", "/absolute/path/to/horus", "run", "--no-dev", "--frozen", "--python", "3.12", "--extra", "mcp", "horus", "mcp", "--workspace", "/absolute/path/to/workspace"]
     }
   }
 }
 ```
 
-Copy the directory reported by `horus skill` to the host's Skill directory:
+### Skill installation
+
+Copy the directory containing the `SKILL.md` reported by `horus skill` to the host's Skill directory:
 `~/.agents/skills/horus` for Codex or `~/.claude/skills/horus` for Claude Code.
 For an isolated local setup, use the equivalent project Skill directory. Follow
 the host's normal tool authorization; horus approval does not bypass it.
@@ -53,6 +91,22 @@ the host's normal tool authorization; horus approval does not bypass it.
 Use `--read-root /absolute/path/to/docs` when the server needs to import local
 OpenAPI/Markdown outside its workspace. Optional source reading uses the host's
 existing tools and permissions. No repository import or source index is needed.
+
+### Other MCP clients
+
+Register the same local stdio server using your client's MCP configuration format:
+
+```json
+{
+  "command": "/absolute/path/to/uv",
+  "args": ["--directory", "/absolute/path/to/horus", "run", "--no-dev", "--frozen", "--python", "3.12", "--extra", "mcp", "horus", "mcp", "--workspace", "/absolute/path/to/workspace"]
+}
+```
+
+The enclosing configuration keys and Skill locations belong to the client. Use
+its current documentation rather than copying another client's paths. Clients
+without MCP support need an MCP adapter; the CLI only replays reviewed plans.
+No extra language-model API key is needed by horus itself.
 
 ## The review-to-report workflow
 
@@ -108,7 +162,7 @@ The plan is saved after confirmation; the directory and plan snapshots are creat
 when execution starts. Reports appear there when it finishes. A retry of the same
 start request returns the existing version. New runs never overwrite earlier ones.
 
-Set `plan.report.language` to the current Codex/Claude Code conversation language,
+Set `plan.report.language` to the current coding-agent conversation language,
 for example `zh-CN` or `en`. Use that language for plan names, business descriptions,
 case/step `title`, and assertion `description`. English and Chinese UI text is built
 in; other languages require translations of all `report.labels` keys listed in the

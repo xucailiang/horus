@@ -1,10 +1,12 @@
 # horus
 
+<img src="docs/assets/horus-logo.png" alt="horus logo" width="360" />
+
 [简体中文](README.zh-CN.md) · [Setup](docs/usage.md) · [Architecture](docs/architecture.md)
 
-horus is an AI-native API testing platform for Codex and Claude Code, connected
-through MCP. It brings business understanding, API call dependencies, functional
-checks, and basic load tests into the conversation where you develop your service.
+horus is an AI-native API testing platform for coding agents, connected through
+MCP and a portable Skill. It brings business understanding, API call dependencies,
+functional checks, and basic load tests into the conversation where you develop your service.
 
 Provide an OpenAPI/Swagger definition and the business behavior you want to verify.
 The agent proposes a test plan for you to review. After you confirm it, horus runs
@@ -34,24 +36,21 @@ the backend's programming language. See [current limits](docs/architecture.md#cu
 
 ## Quick start
 
-Requirements: Python 3.12, uv 0.9.11, and GitHub CLI (`gh`). Install from source:
+Copy this into your coding agent:
 
-```sh
-git clone https://github.com/xucailiang/horus.git
-cd horus
-uv sync --python 3.12 --frozen --extra mcp --group dev
-uv run python scripts/install_engines.py
+```text
+Follow https://github.com/xucailiang/horus/blob/master/docs/usage.md to install
+horus, configure its MCP server and Skill in this coding tool, and verify the connection.
 ```
 
-The installer downloads official Hurl 8.0.1 and k6 2.3.0 binaries and verifies their
-SHA-256 checksums. To use matching binaries already installed, set
-`HORUS_HURL_BIN` and `HORUS_K6_BIN`.
+The agent handles dependencies, MCP configuration, and Skill installation using
+the [setup guide](docs/usage.md). Manual steps are in the same guide.
 
-Follow the [Codex / Claude Code setup guide](docs/usage.md) to configure MCP and
-install the bundled Skill. These are separate steps; `uv run horus skill` prints
-the Skill's location.
+Any coding tool with local MCP support can use horus. Load the Skill through the
+client's Skill mechanism, or have the agent read `skills/horus/SKILL.md`. Codex and
+Claude Code have been verified; other clients use the same server and workflow.
 
-Then ask your coding agent:
+Once installed, start a test:
 
 ```text
 Use horus to test <service URL>, with the API definition at <OpenAPI/Swagger URL>.

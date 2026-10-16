@@ -6,11 +6,13 @@
 
 ## 1. 产品入口
 
-主要用户在 Codex 或 Claude Code 内使用 horus MCP，全程以自然语言描述目标、审核计划和查看报告。宿主 Agent 的 LLM 负责理解、推理、生成计划和解释；horus 负责资料、资产、审核检查、执行和事实报告。CLI 用于一次性安装/诊断、辅助操作和 CI 回放，正常测试过程不要求切换到终端。
+用户在支持本地 MCP 的编程工具内使用 horus，全程以自然语言描述目标、审核计划和查看报告。宿主 Agent 的 LLM 负责理解、推理、生成计划和解释；horus 负责资料、资产、审核检查、执行和事实报告。CLI 用于一次性安装、辅助操作和已审核计划回放。
 
-安装 MCP 和启用 Skill 是不同步骤。产品必须交付两客户端的 MCP 配置与 Skill 安装说明；MCP 初始化 instructions、工具说明及 get_capabilities 提供简明工作流，不假定客户端会自动加载 Skill。Skill 缺失时仍能通过 MCP 完成基本流程，已安装 Skill 时编排体验更稳定。
+MCP 配置和 Skill 安装是不同步骤，具体位置由宿主决定。没有原生 Skill 加载器时，也可让 Agent 阅读 SKILL.md 及其引用。MCP 初始化 instructions、工具说明及 get_capabilities 提供基本工作流。Codex 和 Claude Code 已完成验证，下方配置作为接入示例。
 
 ## 2. 一次性接入
+
+优先把[安装说明](usage.md#install-with-your-coding-agent)交给当前编程助手，由它完成依赖安装、MCP 配置、Skill 安装，并调用 horus_get_capabilities 验证连接。安装不包含对目标服务发起测试。
 
 1. 在运行 MCP 的机器上用 Python 3.12 + uv 安装锁定依赖和固定 Hurl/k6，完成预热；MCP 启动握手不承担首次下载、构建或业务仓库克隆。
 2. 配置客户端以 stdio 启动 horus mcp --workspace <absolute-workspace>。允许空工作区，不要求先运行 horus init 或手写 project.yaml。
@@ -24,7 +26,7 @@ Codex：
 ~~~toml
 [mcp_servers.horus]
 command = "/absolute/path/to/uv"
-args = ["--directory", "/absolute/path/to/horus", "run", "--frozen", "--python", "3.12", "--extra", "mcp", "horus", "mcp", "--workspace", "/absolute/path/to/horus-workspace"]
+args = ["--directory", "/absolute/path/to/horus", "run", "--no-dev", "--frozen", "--python", "3.12", "--extra", "mcp", "horus", "mcp", "--workspace", "/absolute/path/to/horus-workspace"]
 env_vars = ["HORUS_USERNAME", "HORUS_PASSWORD"]
 startup_timeout_sec = 30
 tool_timeout_sec = 60
@@ -38,7 +40,7 @@ Claude Code：
     "horus": {
       "type": "stdio",
       "command": "/absolute/path/to/uv",
-      "args": ["--directory", "/absolute/path/to/horus", "run", "--frozen", "--python", "3.12", "--extra", "mcp", "horus", "mcp", "--workspace", "/absolute/path/to/horus-workspace"]
+      "args": ["--directory", "/absolute/path/to/horus", "run", "--no-dev", "--frozen", "--python", "3.12", "--extra", "mcp", "horus", "mcp", "--workspace", "/absolute/path/to/horus-workspace"]
     }
   }
 }

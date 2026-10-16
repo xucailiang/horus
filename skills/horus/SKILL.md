@@ -1,11 +1,13 @@
 ---
 name: horus
-description: Test HTTP APIs through horus MCP in Codex or Claude Code. Understand the business, preview a plan directly in chat, save it only after human confirmation, then execute and deliver a Markdown report with Mermaid business-flow diagrams in the conversation language.
+description: Test HTTP APIs through horus in MCP-capable coding agents. Understand the business, preview a plan directly in chat, save it only after human confirmation, then execute and deliver a Markdown report with Mermaid business-flow diagrams in the conversation language.
 ---
 
 The host Agent understands and plans; horus executes, cleans up, and reports facts.
 Use MCP for the normal workflow. Start with `horus_get_capabilities` and respect its
 implemented features and gaps. MCP configuration and Skill installation are separate.
+The workflow is client-independent. Use the host's native Skill loader, or read
+this file and its references directly when no loader is available.
 
 ## Understand the target
 
@@ -39,7 +41,7 @@ Read `horus_get_plan_schema` and generate your own draft in memory. Do not call
 `horus_save_plan`, write plan files, or create a test-version folder before the user
 confirms. Use `horus_preview_plan` to validate the draft without saving it.
 
-Set `plan.report.language` from the **current Codex or Claude Code conversation**,
+Set `plan.report.language` from the **current coding-agent conversation**,
 not the OS locale, API documentation language, or an old report. For example, use
 `zh-CN` for a Chinese conversation and `en` for English. Write the plan name,
 business understanding, case/step `title`, and assertion `description` naturally in
