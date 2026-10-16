@@ -1,8 +1,8 @@
 # horus
 
-<img src="docs/assets/horus-logo.png" alt="horus 标识" width="360" />
+<img src="docs/assets/horus-logo.png" alt="horus 标识" width="100%" />
 
-[English](README.md) · [安装与使用](docs/usage.md) · [架构说明](docs/architecture.md)
+[English](README.md) · [安装与使用](docs/usage.md)
 
 horus 是一个通过 MCP 和通用 Skill 接入编程工具的 AI 原生接口测试平台。
 在开发服务的同一段对话里，理解业务规则和接口调用关系，完成功能检查与基础并发测试。
@@ -69,9 +69,7 @@ Agent 先在对话中展示计划，确认后才保存并执行。确认只适�
 ## 文档
 
 - [安装、配置与 CLI 使用](docs/usage.md)
-- [测试与验证](docs/testing.md)
 - [架构与限制](docs/architecture.md)
-- [产品需求](docs/PRD-horus.md)与[技术设计](docs/TECHNICAL-DESIGN.md)
 
 ## 参与贡献
 

@@ -338,7 +338,7 @@ runtime. Changing the target or plan requires another review.
 | 3 | Missing review, blocked/inconclusive result, cancellation, or interruption |
 
 The base wheel can replay a reviewed package without MCP or a model. See
-[testing](testing.md) for reproducible checks and honest acceptance criteria.
+[CONTRIBUTING.md](../CONTRIBUTING.md#verification) for local and client verification.
 
 ## Recover cleanup after interruption
 

@@ -1,8 +1,8 @@
 # horus
 
-<img src="docs/assets/horus-logo.png" alt="horus logo" width="360" />
+<img src="docs/assets/horus-logo.png" alt="horus logo" width="100%" />
 
-[简体中文](README.zh-CN.md) · [Setup](docs/usage.md) · [Architecture](docs/architecture.md)
+[简体中文](README.zh-CN.md) · [Setup](docs/usage.md)
 
 horus is an AI-native API testing platform for coding agents, connected through
 MCP and a portable Skill. It brings business understanding, API call dependencies,
@@ -79,9 +79,7 @@ and a JUnit report. Unrun paths and unresolved cleanup are reported explicitly.
 ## Documentation
 
 - [Setup, configuration, and CLI usage](docs/usage.md)
-- [Testing and verification](docs/testing.md)
 - [Architecture and limits](docs/architecture.md)
-- [Requirements](docs/PRD-horus.md) and [technical design](docs/TECHNICAL-DESIGN.md) (Chinese)
 
 ## Contributing
 

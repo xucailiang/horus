@@ -26,6 +26,27 @@ checksums. Existing binaries can be supplied through `HORUS_HURL_BIN` and
 There is no hosted CI pipeline at this stage. Run the relevant checks locally
 before committing.
 
+## Verification
+
+The test suite exercises local HTTP fixtures with Hurl and k6, including business
+checks, load limits, approval gates, interruption, cleanup, and reports.
+`tests.acceptance.verify_wheel` checks reviewed-plan replay in a clean environment
+without MCP or a model.
+
+For changes to the agent workflow, also verify it in a real coding client:
+
+1. Run `uv run python -m tests.acceptance.prepare_agent` and keep it running.
+   It writes the fixture URL and private credentials under ignored `.horus-demo/`.
+2. Connect MCP and the Skill using the [setup guide](docs/usage.md). Pass credentials
+   through the MCP process environment. Give the agent the API definition,
+   requirements, target, binding names, and limits, rather than a regression plan.
+3. Have it show the plan directly in the conversation. After actual human
+   confirmation, save and execute that version, then read its report and check
+   the requests, results, and cleanup against the fixture.
+
+Automated approvals are test fixtures, not evidence of human confirmation.
+An SDK round trip alone does not verify the coding client's workflow.
+
 ## Changes and pull requests
 
 - Keep changes small and explain the concrete behavior they change.
@@ -42,7 +63,7 @@ before committing.
 
 Describe the problem, resulting behavior, relevant validation, and remaining
 limitations in your pull request. Do not change expected results merely to make a
-faulty backend pass. See [the test workflow](docs/testing.md) for acceptance evidence.
+faulty backend pass.
 
 By contributing, you agree that your contribution is provided under the project's
 [MIT license](LICENSE).

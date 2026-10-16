@@ -177,6 +177,3 @@ contains the current plan; it does not compute a parent/child diff. Validation
 checks execution and coverage references, but does not yet fully check business
 state resource references, dependency producers/consumers, or unique business IDs.
 `maxReportDurationMs` is present in the configuration but is not currently enforced.
-
-The detailed Chinese design and historical decisions remain available in
-[the technical design](TECHNICAL-DESIGN.md) and [ADRs](decisions/).
