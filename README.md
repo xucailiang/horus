@@ -4,35 +4,49 @@
 
 [简体中文](README.zh-CN.md) · [Setup](docs/usage.md)
 
-horus is an AI-native API testing platform for coding agents, connected through
-MCP and a portable Skill. It brings business understanding, API call dependencies,
-functional checks, and basic load tests into the conversation where you develop your service.
+**Turn your coding agent into a testing workspace.**
 
-Provide an OpenAPI/Swagger definition and the business behavior you want to verify.
-The agent proposes a test plan for you to review. After you confirm it, horus runs
-the tests with Hurl and k6, cleans up test data, and returns the report.
+horus is an AI-native API testing platform. Testers can use natural language in
+their existing coding tools to understand business behavior, design tests, run
+functional and basic load checks, and assess the results.
+
+- **Lightweight.** Use your coding agent's existing model and tools, without
+  deploying a separate large testing platform.
+- **Local.** Run the MCP server and test engines on your machine. Plans, execution
+  records, and reports are saved locally.
+- **Portable.** Connect any coding tool with local MCP support through the standard
+  protocol. Load the Skill natively or have the agent read it directly.
+
+You choose the business risks and expected results, and provide an OpenAPI/Swagger
+definition and requirements. AI maps the business rules and call dependencies into
+an executable plan. After you confirm its scope and checks, horus runs the tests,
+cleans up test data, and returns results with evidence.
 
 ```text
-OpenAPI / Swagger → Agent plan → Human confirmation → Hurl + k6 → Report
+Business goal + API definition → AI-designed plan → Your confirmation → Tests + cleanup → Results
 ```
 
 ## Features
 
-- **Business logic and call chains.** The agent connects requirements and API
-  contracts to requests and checks, with optional source context. Plans record
-  their evidence, assumptions, and gaps.
-- **Functional testing.** Verify response data, ownership rules, state changes,
-  conditional paths, and asynchronous workflows, including data preparation and cleanup.
-- **Load testing.** Set concurrency, iterations, and limits before execution.
-  Check latency, HTTP errors, data errors, and completed iterations. Resource
-  observations over SSH are optional and require authorization.
-- **Repeatable execution.** Runs keep separate state and results. Reviewed plans
-  can be exported and replayed through the CLI without MCP or a model. Interrupted
-  runs support a separate cleanup attempt; uncertain outcomes remain visible.
+- **Design tests around business behavior.** Connect requirements, API definitions,
+  and optional source context to business rules, call sequences, and expected
+  results. Plans make their evidence, assumptions, and gaps visible.
+- **Verify complete workflows.** Prepare isolated data, pass values between calls,
+  check permissions, state changes, conditional paths, and asynchronous results,
+  then clean up. Hurl checks response data as well as HTTP status.
+- **Check speed and correctness under load.** Run k6 with reviewed concurrency,
+  iterations, time limits, and thresholds. Measure latency, request errors, data
+  errors, and completed work. Authorized SSH resource observations are optional.
+- **See what was tested and what failed.** Read a short report organized by business
+  goal, with key metrics and Mermaid diagrams. Follow a failure to its checks and
+  request/response evidence. Unrun paths and unresolved cleanup remain visible.
+- **Keep and repeat each test.** Each run stores its approved plan and results
+  together. Export and replay reviewed plans through the CLI without a model.
+  Interrupted runs support a separate cleanup attempt.
 
-horus runs locally and uses the host agent's existing model and tools. The current
-alpha runs on macOS and Linux and tests HTTP/REST APIs with JSON, regardless of
-the backend's programming language. See [current limits](docs/architecture.md#current-limits).
+The current alpha runs on macOS and Linux and tests HTTP/REST APIs with JSON,
+regardless of the backend's programming language. See
+[current limits](docs/architecture.md#current-limits).
 
 ## Quick start
 
@@ -46,9 +60,8 @@ horus, configure its MCP server and Skill in this coding tool, and verify the co
 The agent handles dependencies, MCP configuration, and Skill installation using
 the [setup guide](docs/usage.md). Manual steps are in the same guide.
 
-Any coding tool with local MCP support can use horus. Load the Skill through the
-client's Skill mechanism, or have the agent read `skills/horus/SKILL.md`. Codex and
-Claude Code have been verified; other clients use the same server and workflow.
+Codex and Claude Code have been verified; other MCP clients use the same server
+and workflow.
 
 Once installed, start a test:
 
