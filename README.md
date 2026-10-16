@@ -4,45 +4,47 @@
 
 [简体中文](README.zh-CN.md) · [Setup](docs/usage.md)
 
-**Turn your coding agent into a testing workspace.**
+**Turn your everyday coding tool into an AI testing workspace.**
 
-horus is an AI-native API testing platform. Testers can use natural language in
-their existing coding tools to understand business behavior, design tests, run
-functional and basic load checks, and assess the results.
+horus is a lightweight, AI-native API testing platform that works inside your coding
+tool. Import your API documentation and describe what you want to verify in plain
+language. AI helps you understand business workflows and design tests; after your
+approval, horus runs functional and basic load tests, cleans up test data, and
+delivers a clear report.
 
-- **Lightweight.** Use your coding agent's existing model and tools, without
+You focus on business rules, risks, and what should count as a pass. Your coding
+agent helps turn those decisions into tests, all in the same conversation.
+
+- **Lightweight.** Reuse your coding agent and its model. Get started without
   deploying a separate large testing platform.
-- **Local.** Run the MCP server and test engines on your machine. Plans, execution
-  records, and reports are saved locally.
-- **Portable.** Connect any coding tool with local MCP support through the standard
-  protocol. Load the Skill natively or have the agent read it directly.
-
-Import your API documentation from a URL or a local file. The agent reads it,
-maps the business workflows and call dependencies, and builds a test plan around
-the risks and expected results you describe. After you confirm its scope and
-checks, horus runs the tests, cleans up test data, and returns results with evidence.
+- **Local.** Run tests from your machine and keep plans, execution records, and
+  reports in your own workspace.
+- **Works across tools.** Use horus in any coding tool with local MCP support,
+  and keep working in the environment you already know.
 
 ```text
-API docs + Business goal → Understand call flows → Test plan → Your confirmation → Tests + cleanup → Results
+Import docs → Understand business call flows → Review the plan → Run tests → Cleanup + report
 ```
 
 ## Features
 
-- **Understand business workflows from API documentation.** Map operations and
-  call dependencies, then use requirements and optional source context to design
-  checks. Plans make their evidence, assumptions, and gaps visible.
-- **Verify complete workflows.** Prepare isolated data, pass values between calls,
-  check permissions, state changes, conditional paths, and asynchronous results,
-  then clean up. Hurl checks response data as well as HTTP status.
-- **Check speed and correctness under load.** Run k6 with reviewed concurrency,
-  iterations, time limits, and thresholds. Measure latency, request errors, data
-  errors, and completed work. Authorized SSH resource observations are optional.
-- **See what was tested and what failed.** Read a short report organized by business
-  goal, with key metrics and Mermaid diagrams. Follow a failure to its checks and
-  request/response evidence. Unrun paths and unresolved cleanup remain visible.
-- **Keep and repeat each test.** Each run stores its approved plan and results
-  together. Export and replay reviewed plans through the CLI without a model.
-  Interrupted runs support a separate cleanup attempt.
+- **Turn API documentation into a business test plan.** Share an online link or a
+  local file. The agent connects calls and their dependencies, uses your requirements
+  and optional source context, and shows what to test, why, and what still needs
+  clarification.
+- **Test the whole workflow.** Connect login, data creation, state changes, and
+  asynchronous results. Check who can access or change data, whether the returned
+  values are correct, and whether each business rule holds. Preparation and cleanup
+  are part of the plan.
+- **Check correctness as well as speed under load.** Agree on concurrency and load
+  limits, then see how many requests completed, how long they took, and whether
+  requests failed or returned incorrect data.
+- **Get results you can act on.** See which business checks passed, where they
+  failed, and how the service performed. Business-flow diagrams show what was
+  tested; detailed checks and request/response records help you investigate.
+- **Keep each run ready for review and regression testing.** Plans and results stay
+  together in a separate directory for each run. Repeat an approved plan within
+  its original scope and compare the saved results.
 
 The current alpha runs on macOS and Linux and tests HTTP/REST APIs with JSON,
 regardless of the backend's programming language. See
@@ -54,40 +56,40 @@ Copy this into your coding agent:
 
 ```text
 Follow https://github.com/xucailiang/horus/blob/master/docs/usage.md to install
-horus, configure its MCP server and Skill in this coding tool, and verify the connection.
+horus in this coding tool and verify the connection.
 ```
 
-The agent handles dependencies, MCP configuration, and Skill installation using
-the [setup guide](docs/usage.md). Manual steps are in the same guide.
+Let the agent handle installation and setup. Manual installation and other client
+configurations are in the [setup guide](docs/usage.md). Codex and Claude Code have
+been verified; other MCP clients use the same workflow.
 
-Codex and Claude Code have been verified; other MCP clients use the same server
-and workflow.
-
-Once installed, start a test:
+Then give it your documentation and a testing goal:
 
 ```text
-Use horus to test <service URL>. Import the API documentation from <URL or local file path>.
-Understand the business rules and call dependencies, then propose functional
-and basic concurrency tests, including data preparation and cleanup.
-Show me the plan and load limits first. After I confirm, run it and return the report.
+Test <service URL> with horus. Import the API documentation from <URL or local file path>.
+Map the business call flows and propose functional and basic load tests.
+Show me what you will check, what counts as a pass, and the load limits. Wait for my confirmation.
+Then run the tests, clean up the data, and report the business results, failures, and key metrics.
 ```
 
-The agent shows the plan directly in the conversation before saving or executing
-it. Confirmation applies to that version and scope; changes require another review.
+Review the plan directly in the conversation before it is saved or run. If the
+plan or load changes, you review it again.
 
 ## Reports
 
-Each run has one directory containing its plan and results. Markdown documents
-follow the conversation language:
+Start with a short report: what was tested, what passed, what failed, how the
+service performed, and whether cleanup finished. A business-flow diagram connects
+the results to the original plan. Unrun checks and unresolved cleanup are stated
+explicitly.
+
+Every run keeps its plan and results together. The documents follow your
+conversation language:
 
 | File | Contents |
 | --- | --- |
-| `plan.md` | Confirmed plan, business rules, and full Mermaid call graph |
-| `report.md` | Verdict, problems, business results, key metrics, and a compact business diagram |
-| `details.md` | Step checks and execution evidence |
-
-The directory also includes the executable plan, full redacted results in JSON,
-and a JUnit report. Unrun paths and unresolved cleanup are reported explicitly.
+| `plan.md` | What you agreed to test, expected results, limits, and the business-flow diagram |
+| `report.md` | Business results, problems, key metrics, and a compact business-flow diagram |
+| `details.md` | Detailed checks and request/response records for investigation |
 
 ## Documentation
 
@@ -97,7 +99,7 @@ and a JUnit report. Unrun paths and unresolved cleanup are reported explicitly.
 ## Contributing
 
 Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md)
-for environment setup and local checks. Keep the English and Chinese READMEs in sync.
+for development setup and local checks.
 
 ## License
 
